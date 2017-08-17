@@ -22,22 +22,31 @@
 #include "esp_log.h"
 #include "mqtt.h"
 
-const char *MQTT_TAG = "MQTT_SAMPLE";
+#include "dbnode.h"
+
+const char *MQTT_TAG = "DBNODE";
 
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
-typedef struct app_settings
+typedef struct node_runtime
 {
+  ip4_addr_t ip_addr;
   mqtt_client *client;
   int32_t blink_intervall;
-} app_settings;
+  dio8_t input;
+  dio8_t output;
+} node_runtime;
 
-app_settings dbnode =
+node_runtime dbnode =
 {
   .client = NULL,
   .blink_intervall = 200
 };
+
+// Function declaration
+
+static void parse_mqtt_message( char *topic, char *payload);
 
 void connected_cb(void *self, void *params)
 {
@@ -59,8 +68,8 @@ void publish_cb(void *self, void *params)
 }
 void data_cb(void *self, void *params)
 {
+
   ESP_LOGI(MQTT_TAG, "[APP] Data callback!");
-//  mqtt_client *client = (mqtt_client *)self;
   mqtt_event_data_t *event_data = (mqtt_event_data_t *)params;
 
   if(event_data->data_offset == 0)
@@ -69,6 +78,14 @@ void data_cb(void *self, void *params)
     memcpy(topic, event_data->topic, event_data->topic_length);
     topic[event_data->topic_length] = 0;
     ESP_LOGI(MQTT_TAG, "[APP] Publish topic: %s", topic);
+
+    char *payload = malloc(event_data->data_length + 1);
+    memcpy(payload, event_data->data, event_data->data_length);
+    payload[event_data->data_length] = 0;
+
+    parse_mqtt_message(topic, payload);
+
+    free(payload);
     free(topic);
   }
 
@@ -82,6 +99,39 @@ void data_cb(void *self, void *params)
 
   // free(data);
 
+}
+
+static void parse_mqtt_message( char *topic, char *payload)
+{
+  char * token;
+
+  token = strtok(topic, "/" );
+  if(strcmp(token, "dbnode" ))
+    return;
+
+  token = strtok( NULL, "/" );
+  if(strcmp(token, inet_ntoa(dbnode.ip_addr)))
+    return;
+
+  token = strtok( NULL, "/" );
+  if(!strcmp(token, "out"))
+  {
+    if( payload[0] == '0' || payload[0] == '1')
+    {
+      token = strtok( NULL, "/" );
+      switch (atoi(token))
+      {
+        case 32:
+          gpio_set_level(GPIO_NUM_32, payload[0] == '1' ? 1 : 0);
+        break;
+        case 33:
+          gpio_set_level(GPIO_NUM_33, payload[0] == '1' ? 1 : 0);
+        break;
+        default:
+          ESP_LOGE("DBNODE","Undefined output request!");
+      }
+    }
+  }
 }
 
 mqtt_settings settings = {
@@ -116,6 +166,75 @@ static void peripherial_init(void)
   gpio_set_direction(GPIO_NUM_34, GPIO_MODE_INPUT);
 }
 
+void blink_task(void *pvParameter)
+{
+  int level = 1;
+  while (true)
+  {
+    gpio_set_level(GPIO_NUM_16, level);
+    level = !level;
+    vTaskDelay( dbnode.blink_intervall / portTICK_PERIOD_MS);
+  }
+}
+
+uint8_t get_current_inputs(void)
+{
+  uint8_t result = 0;
+  uint8_t value;
+  uint8_t c = 1;
+
+  value = gpio_get_level(GPIO_NUM_34);
+  result += value ? c : 0 ;
+  c = c << 1;
+
+  return result;
+}
+/*
+int get_data_to_send( char * msg_str )
+{
+  int i;
+  int c;
+
+  if( dbnode.input.newflag )
+  {
+    c = 1;
+    for( i = 1; i <= NUM_INPUTS; i++ )
+    {
+      if( dbnode.input.newflag & c )
+      {
+        sprintf( msg_str, "/node/%s/io/in/%d/%d", node.address, map_io( i, IN_P2L ), (iobox.input.curflag & c) ? 1 : 0 );
+        return ( SEND_DI | i );
+      }
+      c = c << 1;
+    }
+  }
+}
+*/
+void scan_task(void *pvParameter)
+{
+  char topic[64];
+  uint8_t newflag;
+  uint8_t c = 1;     // bit 0
+
+  while(true)
+  {
+    dbnode.input.curflag = get_current_inputs();
+    newflag = dbnode.input.curflag ^ dbnode.input.ackflag;
+    if( newflag )
+    {
+      dbnode.input.newflag |= newflag;
+      sprintf(topic,"/dbnode/%s/in/34",inet_ntoa(dbnode.ip_addr));
+      mqtt_publish(dbnode.client, topic, dbnode.input.curflag ? "1" : "0", 1, 0, 0);
+      // Clear ack- and newflag immediately, don't wait for ACK from server
+      dbnode.input.ackflag &= ~c;
+      dbnode.input.ackflag |= dbnode.input.curflag & c;
+      dbnode.input.newflag &= ~c;
+    }
+
+    vTaskDelay( 50 / portTICK_PERIOD_MS);
+  }
+}
+
 static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
 {
     switch(event->event_id) {
@@ -125,8 +244,10 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
         case SYSTEM_EVENT_STA_GOT_IP:
             xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
             //mqtt_start(&settings);
+            dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
             dbnode.client = mqtt_start(&settings);
             dbnode.blink_intervall = 500;
+            xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, NULL );
             //init app here
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
@@ -163,31 +284,22 @@ static void wifi_conn_init(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void blink_task(void *pvParameter)
-{
-  int level = 1;
-  while (true)
-  {
-    gpio_set_level(GPIO_NUM_16, level);
-    level = !level;
-    vTaskDelay( dbnode.blink_intervall / portTICK_PERIOD_MS);
-  }
-}
-
 void app_main()
 {
     ESP_LOGI(MQTT_TAG, "[APP] Startup..");
     ESP_LOGI(MQTT_TAG, "[APP] Free memory: %d bytes", system_get_free_heap_size());
     ESP_LOGI(MQTT_TAG, "[APP] SDK version: %s, Build time: %s", system_get_sdk_version(), BUID_TIME);
 
-    xTaskCreate( &blink_task, "Blink", 512, NULL, 5, NULL );
-
     nvs_flash_init();
     peripherial_init();
+    xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
+    inet_aton("127.0.0.1", &dbnode.ip_addr);
+
     wifi_conn_init();
 
     while(1)
     {
-      vTaskDelay(300 / portTICK_PERIOD_MS);
+      vTaskDelay( 500 / portTICK_PERIOD_MS);
     }
+
 }
