@@ -16,5 +16,5 @@ ifneq ("$(wildcard $(THISDIR)/include/user_config.local.h)","")
 CFLAGS += -DLOCAL_CONFIG_AVAILABLE
 endif
 
-include $(IDF_PATH)/make/component_common.mk
+#include $(IDF_PATH)/make/component_common.mk
 #include $(IDF_PATH)/make/component.mk

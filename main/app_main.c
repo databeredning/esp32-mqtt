@@ -29,19 +29,12 @@ const char *MQTT_TAG = "DBNODE";
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
-typedef struct node_runtime
-{
-  ip4_addr_t ip_addr;
-  mqtt_client *client;
-  int32_t blink_intervall;
-  dio8_t input;
-  dio8_t output;
-} node_runtime;
-
 node_runtime dbnode =
 {
   .client = NULL,
-  .blink_intervall = 200
+  .blink_intervall = 200,
+  .input.newflag = 0b00000001,
+  .output.newflag = 0b00000011
 };
 
 // Function declaration
@@ -52,7 +45,7 @@ void connected_cb(void *self, void *params)
 {
   ESP_LOGI(MQTT_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
-  mqtt_subscribe(client, "/dbnode/#", 0);
+  mqtt_subscribe(client, "/dbnode/+/set/#", 0);
 }
 void disconnected_cb(void *self, void *params)
 {
@@ -114,7 +107,7 @@ static void parse_mqtt_message( char *topic, char *payload)
     return;
 
   token = strtok( NULL, "/" );
-  if(!strcmp(token, "out"))
+  if(!strcmp(token, "set"))
   {
     if( payload[0] == '0' || payload[0] == '1')
     {
@@ -135,13 +128,13 @@ static void parse_mqtt_message( char *topic, char *payload)
 }
 
 mqtt_settings settings = {
-    .host = "172.16.2.20",
+    .host = "172.19.2.39",
 #if defined(CONFIG_MQTT_SECURITY_ON)
     .port = 8883, // encrypted
 #else
     .port = 1883, // unencrypted
 #endif
-    .client_id = "mqtt_client_id",
+    //.client_id = "mqtt_client_id",
     .username = "user",
     .password = "pass",
     .clean_session = 0,
@@ -161,8 +154,8 @@ mqtt_settings settings = {
 static void peripherial_init(void)
 {
   gpio_set_direction(GPIO_NUM_16, GPIO_MODE_OUTPUT);
-  gpio_set_direction(GPIO_NUM_32, GPIO_MODE_OUTPUT);
-  gpio_set_direction(GPIO_NUM_33, GPIO_MODE_OUTPUT);
+  gpio_set_direction(GPIO_NUM_32, GPIO_MODE_INPUT_OUTPUT);
+  gpio_set_direction(GPIO_NUM_33, GPIO_MODE_INPUT_OUTPUT);
   gpio_set_direction(GPIO_NUM_34, GPIO_MODE_INPUT);
 }
 
@@ -189,47 +182,83 @@ uint8_t get_current_inputs(void)
 
   return result;
 }
-/*
-int get_data_to_send( char * msg_str )
-{
-  int i;
-  int c;
 
-  if( dbnode.input.newflag )
-  {
-    c = 1;
-    for( i = 1; i <= NUM_INPUTS; i++ )
-    {
-      if( dbnode.input.newflag & c )
-      {
-        sprintf( msg_str, "/node/%s/io/in/%d/%d", node.address, map_io( i, IN_P2L ), (iobox.input.curflag & c) ? 1 : 0 );
-        return ( SEND_DI | i );
-      }
-      c = c << 1;
-    }
-  }
+uint8_t get_current_outputs(void)
+{
+  uint8_t result = 0;
+  uint8_t value;
+  uint8_t c = 1;
+
+  value = gpio_get_level(GPIO_NUM_32);
+  result += value ? c : 0 ;
+  c = c << 1;
+
+  value = gpio_get_level(GPIO_NUM_33);
+  result += value ? c : 0 ;
+  c = c << 1;
+
+  return result;
 }
-*/
-void scan_task(void *pvParameter)
+
+static const char *byte_to_binary(uint8_t x)
+{
+  static char b[9];
+  b[0] = '\0';
+
+  int z;
+  for (z = 128; z > 0; z >>= 1)
+  {
+      strcat(b, ((x & z) == z) ? "1" : "0");
+  }
+
+  return b;
+}
+
+static void scan_task(void *pvParameter)
 {
   char topic[64];
   uint8_t newflag;
-  uint8_t c = 1;     // bit 0
+  uint8_t c;
 
   while(true)
   {
+    // Scan for changes
     dbnode.input.curflag = get_current_inputs();
     newflag = dbnode.input.curflag ^ dbnode.input.ackflag;
     if( newflag )
     {
       dbnode.input.newflag |= newflag;
-      sprintf(topic,"/dbnode/%s/in/34",inet_ntoa(dbnode.ip_addr));
-      mqtt_publish(dbnode.client, topic, dbnode.input.curflag ? "1" : "0", 1, 0, 0);
+    }
+    dbnode.output.curflag = get_current_outputs();
+    newflag = dbnode.output.curflag ^ dbnode.output.ackflag;
+    if( newflag )
+    {
+      dbnode.output.newflag |= newflag;
+    }
+
+    // Get data to send but send only one change / cycle
+    if(dbnode.input.newflag)
+    {
+      sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
+      mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.input.curflag), 8, 0, 0);
       // Clear ack- and newflag immediately, don't wait for ACK from server
+
+      c = 0b00000001; // Mask for used bits
       dbnode.input.ackflag &= ~c;
       dbnode.input.ackflag |= dbnode.input.curflag & c;
       dbnode.input.newflag &= ~c;
     }
+    else if(dbnode.output.newflag)
+    {
+      sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(dbnode.ip_addr));
+      mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.output.curflag), 8, 0, 0);
+
+      c = 0b00000011; // Mask for used bits
+      dbnode.output.ackflag &= ~c;
+      dbnode.output.ackflag |= dbnode.output.curflag & c;
+      dbnode.output.newflag &= ~c;
+    }
+
 
     vTaskDelay( 50 / portTICK_PERIOD_MS);
   }
@@ -245,6 +274,7 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
             xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
             //mqtt_start(&settings);
             dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
+            sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(dbnode.ip_addr), (uint16_t)esp_random()); 
             dbnode.client = mqtt_start(&settings);
             dbnode.blink_intervall = 500;
             xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, NULL );
@@ -287,8 +317,6 @@ static void wifi_conn_init(void)
 void app_main()
 {
     ESP_LOGI(MQTT_TAG, "[APP] Startup..");
-    ESP_LOGI(MQTT_TAG, "[APP] Free memory: %d bytes", system_get_free_heap_size());
-    ESP_LOGI(MQTT_TAG, "[APP] SDK version: %s, Build time: %s", system_get_sdk_version(), BUID_TIME);
 
     nvs_flash_init();
     peripherial_init();
