@@ -26,6 +26,8 @@
 
 const char *MQTT_TAG = "DBNODE";
 
+static TaskHandle_t xScanTask = NULL;
+
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
@@ -46,10 +48,12 @@ void connected_cb(void *self, void *params)
   ESP_LOGI(MQTT_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
   mqtt_subscribe(client, "/dbnode/+/set/#", 0);
+  dbnode.blink_intervall = 1000;
 }
 void disconnected_cb(void *self, void *params)
 {
   ESP_LOGI(MQTT_TAG, "[APP] Disconnected callback!");
+  dbnode.blink_intervall = 500;
 }
 void subscribe_cb(void *self, void *params)
 {
@@ -135,6 +139,7 @@ mqtt_settings settings = {
     .port = 1883, // unencrypted
 #endif
     //.client_id = "mqtt_client_id",
+    .auto_reconnect = 1,
     .username = "user",
     .password = "pass",
     .clean_session = 0,
@@ -271,21 +276,20 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
             esp_wifi_connect();
             break;
         case SYSTEM_EVENT_STA_GOT_IP:
-            xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-            //mqtt_start(&settings);
-            dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
-            sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(dbnode.ip_addr), (uint16_t)esp_random()); 
-            dbnode.client = mqtt_start(&settings);
             dbnode.blink_intervall = 500;
-            xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, NULL );
+            xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
+            dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
+            sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(dbnode.ip_addr), (uint16_t)esp_random());
+            dbnode.client = mqtt_start(&settings);
+            xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
             //init app here
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
             /* This is a workaround as ESP32 WiFi libs don't currently
                auto-reassociate. */
-            dbnode.blink_intervall = 200;
-            esp_wifi_connect();
+            dbnode.blink_intervall = 200; // no wifi!
             mqtt_stop();
+            esp_wifi_connect();
             xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
             break;
         default:
