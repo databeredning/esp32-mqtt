@@ -1,3 +1,6 @@
 [submodule "components/espmqtt"]
 	path = components/espmqtt
 	url = https://github.com/tuanpmt/espmqtt.git
+[submodule "components/ds18b20"]
+	path = components/ds18b20
+	url = https://github.com/feelfreelinux/ds18b20.git
