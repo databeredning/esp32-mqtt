@@ -31,6 +31,7 @@
 const char *MQTT_TAG = "DBNODE";
 
 static TaskHandle_t xScanTask = NULL;
+static TaskHandle_t xNextionTask = NULL;
 
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
