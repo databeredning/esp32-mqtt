@@ -324,8 +324,6 @@ static void wifi_conn_init(void)
 
 #define BUF_SIZE (1024)
 
-static const char *TAG = "uart_events";
-
 static QueueHandle_t uart1_queue;
 
 static void uart_event_task(void *pvParameters)
@@ -336,7 +334,7 @@ static void uart_event_task(void *pvParameters)
     for(;;) {
         //Waiting for UART event.
         if(xQueueReceive(uart1_queue, (void * )&event, (portTickType)portMAX_DELAY)) {
-            ESP_LOGI(TAG, "uart[%d] event:", UART_NUM_1);
+            ESP_LOGI(MQTT_TAG, "uart[%d] event:", UART_NUM_1);
             switch(event.type) {
                 //Event of UART receving data
                 /*We'd better handler data event fast, there would be much more data events than
@@ -345,41 +343,41 @@ static void uart_event_task(void *pvParameters)
                 in this example, we don't process data in event, but read data outside.*/
                 case UART_DATA:
                     uart_get_buffered_data_len(UART_NUM_1, &buffered_size);
-                    ESP_LOGI(TAG, "data, len: %d; buffered len: %d", event.size, buffered_size);
+                    ESP_LOGI(MQTT_TAG, "data, len: %d; buffered len: %d", event.size, buffered_size);
                     break;
                 //Event of HW FIFO overflow detected
                 case UART_FIFO_OVF:
-                    ESP_LOGI(TAG, "hw fifo overflow\n");
+                    ESP_LOGI(MQTT_TAG, "hw fifo overflow\n");
                     //If fifo overflow happened, you should consider adding flow control for your application.
                     //We can read data out out the buffer, or directly flush the rx buffer.
                     uart_flush(UART_NUM_1);
                     break;
                 //Event of UART ring buffer full
                 case UART_BUFFER_FULL:
-                    ESP_LOGI(TAG, "ring buffer full\n");
+                    ESP_LOGI(MQTT_TAG, "ring buffer full\n");
                     //If buffer full happened, you should consider encreasing your buffer size
                     //We can read data out out the buffer, or directly flush the rx buffer.
                     uart_flush(UART_NUM_1);
                     break;
                 //Event of UART RX break detected
                 case UART_BREAK:
-                    ESP_LOGI(TAG, "uart rx break\n");
+                    ESP_LOGI(MQTT_TAG, "uart rx break\n");
                     break;
                 //Event of UART parity check error
                 case UART_PARITY_ERR:
-                    ESP_LOGI(TAG, "uart parity error\n");
+                    ESP_LOGI(MQTT_TAG, "uart parity error\n");
                     break;
                 //Event of UART frame error
                 case UART_FRAME_ERR:
-                    ESP_LOGI(TAG, "uart frame error\n");
+                    ESP_LOGI(MQTT_TAG, "uart frame error\n");
                     break;
                 //UART_PATTERN_DET
                 case UART_PATTERN_DET:
-                    ESP_LOGI(TAG, "uart pattern detected\n");
+                    ESP_LOGI(MQTT_TAG, "uart pattern detected\n");
                     break;
                 //Others
                 default:
-                    ESP_LOGI(TAG, "uart event type: %d\n", event.type);
+                    ESP_LOGI(MQTT_TAG, "uart event type: %d\n", event.type);
                     break;
             }
         }
@@ -387,6 +385,24 @@ static void uart_event_task(void *pvParameters)
     free(dtmp);
     dtmp = NULL;
     vTaskDelete(NULL);
+}
+
+static void uart_init()
+{
+  uart_config_t uart_config = {
+    .baud_rate = 9600,
+    .data_bits = UART_DATA_8_BITS,
+    .parity = UART_PARITY_DISABLE,
+    .stop_bits = UART_STOP_BITS_1,
+    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+    .rx_flow_ctrl_thresh = 122,
+  };
+
+  uart_param_config(UART_NUM_1, &uart_config);
+  uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart1_queue, 0);
+  uart_set_pin(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+  //Create a task to handle UART event from ISR
+  xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
 }
 
 
@@ -398,30 +414,15 @@ void app_main()
     peripherial_init();
     xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
     inet_aton("127.0.0.1", &dbnode.ip_addr);
-
     wifi_conn_init();
     DS_init(17);
+    uart_init();
 
-    uart_config_t uart_config = {
-      .baud_rate = 9600,
-      .data_bits = UART_DATA_8_BITS,
-      .parity = UART_PARITY_DISABLE,
-      .stop_bits = UART_STOP_BITS_1,
-      .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-      .rx_flow_ctrl_thresh = 122,
-    };
-
-    uart_param_config(UART_NUM_1, &uart_config);
-    uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart1_queue, 0);
-    uart_set_pin(UART_NUM_1, 10, 9, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    //Create a task to handler UART event from ISR
-    xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
     //process data
-    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
-
     nextion_init();
 
 #if 1
+  uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
   char buffer[64];
   while(1)
   {
@@ -431,7 +432,9 @@ void app_main()
     int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
   }
 #else
+    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
     char buffer[64];
+
     while(1)
     {
       nextion_req_config_txt();
