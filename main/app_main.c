@@ -19,7 +19,6 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
-#include "soc/uart_struct.h"
 
 #include "esp_log.h"
 #include "mqtt.h"
@@ -28,7 +27,7 @@
 #include "nextion.h"
 #include "dbnode.h"
 
-const char *MQTT_TAG = "DBNODE";
+const char *MAIN_TAG = "DBNODE";
 
 static TaskHandle_t xScanTask = NULL;
 static TaskHandle_t xNextionTask = NULL;
@@ -50,28 +49,28 @@ static void parse_mqtt_message( char *topic, char *payload);
 
 void connected_cb(void *self, void *params)
 {
-  ESP_LOGI(MQTT_TAG, "[APP] Connected callback!");
+  ESP_LOGI(MAIN_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
   mqtt_subscribe(client, "/dbnode/+/set/#", 0);
   dbnode.blink_intervall = 1000;
 }
 void disconnected_cb(void *self, void *params)
 {
-  ESP_LOGI(MQTT_TAG, "[APP] Disconnected callback!");
+  ESP_LOGI(MAIN_TAG, "[APP] Disconnected callback!");
   dbnode.blink_intervall = 500;
 }
 void subscribe_cb(void *self, void *params)
 {
-  ESP_LOGI(MQTT_TAG, "[APP] Subscribe callback!");
+  ESP_LOGI(MAIN_TAG, "[APP] Subscribe callback!");
 }
 void publish_cb(void *self, void *params)
 {
-  ESP_LOGI(MQTT_TAG, "[APP] Publish callback!");
+  ESP_LOGI(MAIN_TAG, "[APP] Publish callback!");
 }
 void data_cb(void *self, void *params)
 {
 
-  ESP_LOGI(MQTT_TAG, "[APP] Data callback!");
+  ESP_LOGI(MAIN_TAG, "[APP] Data callback!");
   mqtt_event_data_t *event_data = (mqtt_event_data_t *)params;
 
   if(event_data->data_offset == 0)
@@ -79,7 +78,7 @@ void data_cb(void *self, void *params)
     char *topic = malloc(event_data->topic_length + 1);
     memcpy(topic, event_data->topic, event_data->topic_length);
     topic[event_data->topic_length] = 0;
-    ESP_LOGI(MQTT_TAG, "[APP] Publish topic: %s", topic);
+    ESP_LOGI(MAIN_TAG, "[APP] Publish topic: %s", topic);
 
     char *payload = malloc(event_data->data_length + 1);
     memcpy(payload, event_data->data, event_data->data_length);
@@ -94,7 +93,7 @@ void data_cb(void *self, void *params)
   // char *data = malloc(event_data->data_length + 1);
   // memcpy(data, event_data->data, event_data->data_length);
   // data[event_data->data_length] = 0;
-  ESP_LOGI(MQTT_TAG, "[APP] Publish data[%d/%d bytes]",
+  ESP_LOGI(MAIN_TAG, "[APP] Publish data[%d/%d bytes]",
              event_data->data_length + event_data->data_offset,
              event_data->data_total_length);
   // data);
@@ -319,97 +318,24 @@ static void wifi_conn_init(void)
     };
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(ESP_IF_WIFI_STA, &wifi_config));
-    ESP_LOGI(MQTT_TAG, "start the WIFI SSID:[%s] password:[%s]", CONFIG_WIFI_SSID, "******");
+    ESP_LOGI(MAIN_TAG, "start the WIFI SSID:[%s] password:[%s]", CONFIG_WIFI_SSID, "******");
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-#define BUF_SIZE (1024)
-
-static QueueHandle_t uart1_queue;
-
-static void uart_event_task(void *pvParameters)
+void send_to_nextion_task( const char *var, const char* value )
 {
-    uart_event_t event;
-    size_t buffered_size;
-    uint8_t* dtmp = (uint8_t*) malloc(BUF_SIZE);
-    for(;;) {
-        //Waiting for UART event.
-        if(xQueueReceive(uart1_queue, (void * )&event, (portTickType)portMAX_DELAY)) {
-            ESP_LOGI(MQTT_TAG, "uart[%d] event:", UART_NUM_1);
-            switch(event.type) {
-                //Event of UART receving data
-                /*We'd better handler data event fast, there would be much more data events than
-                other types of events. If we take too much time on data event, the queue might
-                be full.
-                in this example, we don't process data in event, but read data outside.*/
-                case UART_DATA:
-                    uart_get_buffered_data_len(UART_NUM_1, &buffered_size);
-                    ESP_LOGI(MQTT_TAG, "data, len: %d; buffered len: %d", event.size, buffered_size);
-                    break;
-                //Event of HW FIFO overflow detected
-                case UART_FIFO_OVF:
-                    ESP_LOGI(MQTT_TAG, "hw fifo overflow\n");
-                    //If fifo overflow happened, you should consider adding flow control for your application.
-                    //We can read data out out the buffer, or directly flush the rx buffer.
-                    uart_flush(UART_NUM_1);
-                    break;
-                //Event of UART ring buffer full
-                case UART_BUFFER_FULL:
-                    ESP_LOGI(MQTT_TAG, "ring buffer full\n");
-                    //If buffer full happened, you should consider encreasing your buffer size
-                    //We can read data out out the buffer, or directly flush the rx buffer.
-                    uart_flush(UART_NUM_1);
-                    break;
-                //Event of UART RX break detected
-                case UART_BREAK:
-                    ESP_LOGI(MQTT_TAG, "uart rx break\n");
-                    break;
-                //Event of UART parity check error
-                case UART_PARITY_ERR:
-                    ESP_LOGI(MQTT_TAG, "uart parity error\n");
-                    break;
-                //Event of UART frame error
-                case UART_FRAME_ERR:
-                    ESP_LOGI(MQTT_TAG, "uart frame error\n");
-                    break;
-                //UART_PATTERN_DET
-                case UART_PATTERN_DET:
-                    ESP_LOGI(MQTT_TAG, "uart pattern detected\n");
-                    break;
-                //Others
-                default:
-                    ESP_LOGI(MQTT_TAG, "uart event type: %d\n", event.type);
-                    break;
-            }
-        }
-    }
-    free(dtmp);
-    dtmp = NULL;
-    vTaskDelete(NULL);
+  nextion_queue_message_t nextion_message;
+  nextion_queue_message_t *pm;
+
+  pm = &nextion_message;
+  strcpy(pm->var, var);
+  strcpy(pm->value,value);
+  xQueueSend( xQueue_nextion, &pm, ( TickType_t ) 0 );
 }
-
-static void uart_init()
-{
-  uart_config_t uart_config = {
-    .baud_rate = 9600,
-    .data_bits = UART_DATA_8_BITS,
-    .parity = UART_PARITY_DISABLE,
-    .stop_bits = UART_STOP_BITS_1,
-    .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-    .rx_flow_ctrl_thresh = 122,
-  };
-
-  uart_param_config(UART_NUM_1, &uart_config);
-  uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart1_queue, 0);
-  uart_set_pin(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-  //Create a task to handle UART event from ISR
-  xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
-}
-
 
 void app_main()
 {
-    ESP_LOGI(MQTT_TAG, "[APP] Startup..");
+    ESP_LOGI(MAIN_TAG, "[APP] Startup..");
 
     nvs_flash_init();
     peripherial_init();
@@ -417,20 +343,17 @@ void app_main()
     inet_aton("127.0.0.1", &dbnode.ip_addr);
     wifi_conn_init();
     DS_init(17);
-    uart_init();
-
-    //process data
-    nextion_init();
+// Start nextion task here
+    xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
 
 #if 1
-  uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
   char buffer[64];
+  char temperature[5];
   while(1)
   {
-    sprintf(buffer,"%3.1f", DS_get_temp());
-    nextion_set_status_txt( "PV", buffer );
+    sprintf(temperature,"%3.1f", DS_get_temp());
+    send_to_nextion_task("PV", temperature);
     vTaskDelay( 1000 / portTICK_PERIOD_MS);
-    int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
   }
 #else
     uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
@@ -439,16 +362,16 @@ void app_main()
     while(1)
     {
       nextion_req_config_txt();
-      ESP_LOGI(MQTT_TAG,"Sent request!")
+      ESP_LOGI(MAIN_TAG,"Sent request!")
       vTaskDelay( 1000 / portTICK_PERIOD_MS);
       int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
       if(len > 0)
       {
-        ESP_LOGI(MQTT_TAG, "UART read : %d ", len);
+        ESP_LOGI(MAIN_TAG, "UART read : %d ", len);
       }
       else
       {
-        ESP_LOGI(MQTT_TAG, "It's quiet");
+        ESP_LOGI(MAIN_TAG, "It's quiet");
       }
 
     }

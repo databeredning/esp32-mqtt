@@ -2,6 +2,10 @@
 #define _NEXTION_H
 #include <stdint.h>
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "freertos/event_groups.h"
+
 #define NEX_RET_CMD_FINISHED                (0x01)
 #define NEX_RET_EVENT_LAUNCHED              (0x88)
 #define NEX_RET_EVENT_UPGRADED              (0x89)
@@ -28,8 +32,22 @@ typedef struct
   char MaxOffTime[8];
 } nextion_config;
 
+#define NEXTION_QUEUE_SIZE 10
 
+typedef struct
+{
+  char id;
+  char var[16];
+  char value[16];
+} nextion_queue_message_t;
+
+#define BUF_SIZE (1024)
+
+extern QueueHandle_t xQueue_nextion;
+
+void    nextion_task(void *pvParameter);
 uint8_t nextion_init( void );
+
 void    nextion_send_command( char *cmd );
 uint8_t nextion_get_response( char * response );
 uint8_t nextion_get_register( const char *reg, char *val );
