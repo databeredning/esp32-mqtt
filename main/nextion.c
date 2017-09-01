@@ -7,6 +7,8 @@
 #include "esp_log.h"
 
 const char *NEXTION_TAG = "NEXTION";
+static QueueHandle_t uart1_queue;
+QueueHandle_t xQueue_nextion;
 
 void nextion_set_status_txt( const char *reg, const char *val )
 {
@@ -142,8 +144,6 @@ uint8_t nextion_handle_req_config_txt( nextion_config *config )
 
 }
 
-static QueueHandle_t uart1_queue;
-
 static void uart_event_task(void *pvParameters)
 {
     uart_event_t event;
@@ -225,8 +225,6 @@ static void uart_init( uart_port_t uart, gpio_num_t txpin, gpio_num_t rxpin )
   xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
 }
 
-QueueHandle_t xQueue_nextion;
-
 void nextion_task(void *pvParameter)
 {
   nextion_queue_message_t *nextion_message;
@@ -234,11 +232,14 @@ void nextion_task(void *pvParameter)
   ESP_LOGI(NEXTION_TAG, "Nextion task started.");
   uart_init(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9);
   nextion_init();
+
   xQueue_nextion = xQueueCreate( 10, sizeof( nextion_queue_message_t * ) );
   if( xQueue_nextion == 0 )
   {
     ESP_LOGE(NEXTION_TAG,"Error creating QueueHandle_t in %s", __FILE__ );
   }
+
+  vTaskDelay(50 / portTICK_PERIOD_MS);
 
   uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
 

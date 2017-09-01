@@ -35,17 +35,22 @@ static TaskHandle_t xNextionTask = NULL;
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
+
 node_runtime dbnode =
 {
   .client = NULL,
   .blink_intervall = 200,
-  .input.newflag = 0b00000001,
+  .status.newflag = 0b00000001,
+  .input.newflag  = 0b00000001,
   .output.newflag = 0b00000011
 };
 
-// Function declaration
+// == Private function prototypes ==============================
 
+void send_to_nextion_task( const char *var, const char* value );
 static void parse_mqtt_message( char *topic, char *payload);
+
+// =============================================================
 
 void connected_cb(void *self, void *params)
 {
@@ -229,6 +234,7 @@ static void scan_task(void *pvParameter)
   char topic[64];
   uint8_t newflag;
   uint8_t c;
+  uint8_t i;
 
   while(true)
   {
@@ -239,17 +245,26 @@ static void scan_task(void *pvParameter)
     {
       dbnode.input.newflag |= newflag;
     }
+
     dbnode.output.curflag = get_current_outputs();
     newflag = dbnode.output.curflag ^ dbnode.output.ackflag;
     if( newflag )
     {
       dbnode.output.newflag |= newflag;
     }
+
+    newflag = dbnode.status.curflag ^ dbnode.status.ackflag;
+    if(newflag)
+    {
+      dbnode.status.newflag |= newflag;
+    }
+
     // Get data to send but send only one change / cycle
     if(dbnode.input.newflag)
     {
       sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
-      mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.input.curflag), 8, 0, 0);
+      if( dbnode.client != NULL )
+        mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.input.curflag), 8, 0, 0);
       // Clear ack- and newflag immediately, don't wait for ACK from server
 
       c = 0b00000001; // Mask for used bits
@@ -260,12 +275,36 @@ static void scan_task(void *pvParameter)
     else if(dbnode.output.newflag)
     {
       sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(dbnode.ip_addr));
-      mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.output.curflag), 8, 0, 0);
+      if( dbnode.client != NULL )
+        mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.output.curflag), 8, 0, 0);
 
       c = 0b00000011; // Mask for used bits
       dbnode.output.ackflag &= ~c;
       dbnode.output.ackflag |= dbnode.output.curflag & c;
       dbnode.output.newflag &= ~c;
+    }
+
+
+    if(dbnode.status.newflag)
+    {
+      c = 1;
+      for( i = 1; i <= 8; i++ )
+      {
+        if( dbnode.status.newflag & c )
+        {
+          switch(c)
+          {
+            case NETWORK_STATUS:
+              send_to_nextion_task("Network", (dbnode.status.curflag & c) ? "Ok" : "Error" );
+            break;
+          }
+          dbnode.status.ackflag &= ~c;
+          dbnode.status.ackflag |= dbnode.status.curflag & c;
+          dbnode.status.newflag &= ~c;
+        }
+        c = c << 1;
+      }
+
     }
 
 
@@ -285,13 +324,14 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
             dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
             sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(dbnode.ip_addr), (uint16_t)esp_random());
             dbnode.client = mqtt_start(&settings);
-            xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
+            dbnode.status.curflag |= NETWORK_STATUS;
             //init app here
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
             /* This is a workaround as ESP32 WiFi libs don't currently
                auto-reassociate. */
             dbnode.blink_intervall = 200; // no wifi!
+            dbnode.status.curflag &= ~NETWORK_STATUS;
             mqtt_stop();
             esp_wifi_connect();
             xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
@@ -339,12 +379,14 @@ void app_main()
 
     nvs_flash_init();
     peripherial_init();
+    DS_init(17);
+
     xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
+    xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
+    xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
+
     inet_aton("127.0.0.1", &dbnode.ip_addr);
     wifi_conn_init();
-    DS_init(17);
-// Start nextion task here
-    xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
 
 #if 1
   char buffer[64];
