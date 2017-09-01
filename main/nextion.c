@@ -232,7 +232,12 @@ void nextion_task(void *pvParameter)
   ESP_LOGI(NEXTION_TAG, "Nextion task started.");
   uart_init(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9);
   nextion_init();
+<<<<<<< HEAD
 
+=======
+  vTaskDelay(500 / portTICK_PERIOD_MS);
+  
+>>>>>>> e8440bfe91a8579dbb64448237c5d80309a34a5b
   xQueue_nextion = xQueueCreate( 10, sizeof( nextion_queue_message_t * ) );
   if( xQueue_nextion == 0 )
   {
