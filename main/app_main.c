@@ -40,11 +40,7 @@ node_runtime dbnode =
 {
   .client = NULL,
   .blink_intervall = 200,
-<<<<<<< HEAD
   .status.newflag = 0b00000001,
-=======
-  .status.newflag = 0b00000000,
->>>>>>> e8440bfe91a8579dbb64448237c5d80309a34a5b
   .input.newflag  = 0b00000001,
   .output.newflag = 0b00000011
 };
