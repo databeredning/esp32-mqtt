@@ -8,7 +8,6 @@
 // Status bits in node_runtime.status.curflag
 #define NETWORK_STATUS 0b00000001
 
-
 typedef struct
 {
   uint8_t curflag;

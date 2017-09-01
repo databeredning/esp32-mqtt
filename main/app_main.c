@@ -47,7 +47,7 @@ node_runtime dbnode =
 
 // == Private function prototypes ==============================
 
-void send_to_nextion_task( const char *var, const char* value );
+void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const char* value );
 static void parse_mqtt_message( char *topic, char *payload);
 
 // =============================================================
@@ -295,7 +295,7 @@ static void scan_task(void *pvParameter)
           switch(c)
           {
             case NETWORK_STATUS:
-              send_to_nextion_task("Network", (dbnode.status.curflag & c) ? "Ok" : "Error" );
+              send_to_nextion_task(SET_STATUS_TEXT, "Network", (dbnode.status.curflag & c) ? "Ok" : "Error" );
             break;
           }
           dbnode.status.ackflag &= ~c;
@@ -362,15 +362,15 @@ static void wifi_conn_init(void)
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 
-void send_to_nextion_task( const char *var, const char* value )
+void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const char* value )
 {
   nextion_queue_message_t nextion_message;
-  nextion_queue_message_t *pm;
 
-  pm = &nextion_message;
-  strcpy(pm->var, var);
-  strcpy(pm->value,value);
-  xQueueSend( xQueue_nextion, &pm, ( TickType_t ) 0 );
+  nextion_message.id = id;
+  strcpy(nextion_message.var, var);
+  strcpy(nextion_message.value,value);
+  xQueueSend( xQueue_nextion, &nextion_message, ( TickType_t ) 0 );
+
 }
 
 void app_main()
@@ -394,8 +394,16 @@ void app_main()
   while(1)
   {
     sprintf(temperature,"%3.1f", DS_get_temp());
-    send_to_nextion_task("PV", temperature);
-    vTaskDelay( 1000 / portTICK_PERIOD_MS);
+    //send_to_nextion_task( SET_STATUS_TEXT, "PV", temperature);
+    vTaskDelay( 500 / portTICK_PERIOD_MS);
+    send_to_nextion_task( GET_CONFIG_TEXT, "SV", "");
+    vTaskDelay( 50 / portTICK_PERIOD_MS);
+    send_to_nextion_task( GET_CONFIG_TEXT, "MaxOnTime", "");
+    vTaskDelay( 50 / portTICK_PERIOD_MS);
+    send_to_nextion_task( GET_CONFIG_TEXT, "MaxOffTime", "");
+    vTaskDelay( 50 / portTICK_PERIOD_MS);
+    send_to_nextion_task( GET_CONFIG_TEXT, "Mode", "");
+    vTaskDelay( 50 / portTICK_PERIOD_MS);
   }
 #else
     uint8_t* data = (uint8_t*) malloc(BUF_SIZE);

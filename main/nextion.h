@@ -34,9 +34,17 @@ typedef struct
 
 #define NEXTION_QUEUE_SIZE 10
 
+typedef enum
+{
+   SET_STATUS_TEXT,
+   GET_STATUS_TEXT,
+   SET_CONFIG_TEXT,
+   GET_CONFIG_TEXT
+} nextion_queue_message_id_t;
+
 typedef struct
 {
-  char id;
+  nextion_queue_message_id_t id;
   char var[16];
   char value[16];
 } nextion_queue_message_t;
@@ -51,7 +59,7 @@ uint8_t nextion_init( void );
 void    nextion_send_command( char *cmd );
 uint8_t nextion_get_response( char * response );
 uint8_t nextion_get_register( const char *reg, char *val );
-uint8_t nextion_get_config_txt( const char *reg, char *val );
+void    nextion_get_config_txt( const char *reg );
 void    nextion_set_config_txt( const char *reg, const char *val );
 void    nextion_set_status_txt( const char *reg, const char *val );
 
