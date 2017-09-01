@@ -231,7 +231,7 @@ static void uart_init( uart_port_t uart, gpio_num_t txpin, gpio_num_t rxpin )
   uart_driver_install(uart, BUF_SIZE * 2, BUF_SIZE * 2, 10, &uart1_queue, 0);
   uart_set_pin(uart, txpin, rxpin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
   //Create a task to handle UART event from ISR
-  xTaskCreate(uart_event_task, "uart_event_task", 2048, NULL, 12, NULL);
+  xTaskCreate(uart_event_task, "uart1_event_task", 2048, NULL, 12, NULL);
 }
 
 void nextion_task(void *pvParameter)
@@ -239,7 +239,8 @@ void nextion_task(void *pvParameter)
   nextion_queue_message_t nextion_message;
 
   ESP_LOGI(NEXTION_TAG, "Nextion task started.");
-  uart_init(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9);
+  //uart_init(UART_NUM_1, GPIO_NUM_10, GPIO_NUM_9);
+  uart_init(UART_NUM_1, GPIO_NUM_27, GPIO_NUM_26);
   nextion_init();
 
   xQueue_nextion = xQueueCreate( 10, sizeof( nextion_queue_message_t ) );

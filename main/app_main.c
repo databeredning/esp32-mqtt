@@ -26,6 +26,7 @@
 
 #include "nextion.h"
 #include "dbnode.h"
+#include "modbus.h"
 
 const char *MAIN_TAG = "DBNODE";
 
@@ -384,46 +385,28 @@ void app_main()
     xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
     xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
     xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
+    xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
 
     inet_aton("127.0.0.1", &dbnode.ip_addr);
     wifi_conn_init();
 
-#if 1
+#if 0
   char buffer[64];
   char temperature[5];
   while(1)
   {
-    sprintf(temperature,"%3.1f", DS_get_temp());
-    //send_to_nextion_task( SET_STATUS_TEXT, "PV", temperature);
-    vTaskDelay( 500 / portTICK_PERIOD_MS);
+    //sprintf(temperature,"%3.1f", DS_get_temp());
+    send_to_nextion_task( SET_STATUS_TEXT, "PV", temperature);
     send_to_nextion_task( GET_CONFIG_TEXT, "SV", "");
-    vTaskDelay( 50 / portTICK_PERIOD_MS);
     send_to_nextion_task( GET_CONFIG_TEXT, "MaxOnTime", "");
-    vTaskDelay( 50 / portTICK_PERIOD_MS);
     send_to_nextion_task( GET_CONFIG_TEXT, "MaxOffTime", "");
-    vTaskDelay( 50 / portTICK_PERIOD_MS);
     send_to_nextion_task( GET_CONFIG_TEXT, "Mode", "");
-    vTaskDelay( 50 / portTICK_PERIOD_MS);
+    vTaskDelay( 500 / portTICK_PERIOD_MS);
   }
 #else
-    uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
-    char buffer[64];
-
-    while(1)
-    {
-      nextion_req_config_txt();
-      ESP_LOGI(MAIN_TAG,"Sent request!")
-      vTaskDelay( 1000 / portTICK_PERIOD_MS);
-      int len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
-      if(len > 0)
-      {
-        ESP_LOGI(MAIN_TAG, "UART read : %d ", len);
-      }
-      else
-      {
-        ESP_LOGI(MAIN_TAG, "It's quiet");
-      }
-
-    }
+  while(1)
+  {
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+  }
 #endif
 }
