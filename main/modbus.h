@@ -7,16 +7,13 @@
 
 #include <stdint.h>
 
-#define BUFFER_SIZE 128
+// Public variables
+uint16_t    modbus_register[3];
 
-char          frame[BUFFER_SIZE];
-uint16_t      modbus_register[3];
-
+// Public functions
 void    modbus_task(void *pvParameter);
-
-unsigned int  calculateCRC(unsigned char bufferSize);
-unsigned int  readholdingregister( unsigned char id, unsigned int address, unsigned char numreg );
-unsigned char getresponse();
+uint8_t read_holding_registers( uint8_t id, uint16_t address, uint16_t numreg );
+uint8_t preset_single_register( uint8_t id, uint16_t address, uint16_t value );
 
 
 #endif

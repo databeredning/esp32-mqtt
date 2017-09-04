@@ -6,11 +6,36 @@
 #include "esp_log.h"
 
 #define BUF_SIZE (1024)
+#define BUFFER_SIZE 128
 
 const char *MODBUS_TAG = "MODBUS";
 static QueueHandle_t uart_queue;
+static uint8_t frame[BUFFER_SIZE];
 
-unsigned int readholdingregister( unsigned char id, unsigned int address, unsigned char numreg )
+static uint16_t calculateCRC(uint8_t bufferSize);
+static uint8_t  getresponse();
+
+uint8_t preset_single_register( uint8_t id, uint16_t address, uint16_t value )
+{
+  unsigned int crc16;
+
+  frame[0] = id;             // ID
+  frame[1] = 0x06;           // Function #
+  frame[2] = address >> 8;   // Address Hi
+  frame[3] = address & 0xFF; // Address Lo
+  frame[4] = value >> 8;     // Value of registers Hi
+  frame[5] = value & 0xFF;   // Value of register Lo
+  crc16 = calculateCRC( 6 );
+  frame[6] = crc16 >> 8;     // crc Hi
+  frame[7] = crc16 & 0xFF;   // crc Lo
+
+  uart_write_bytes( UART_NUM_2, (char*)frame, 8 );
+  ESP_LOGI(MODBUS_TAG, "FC #06 Preset single register");
+
+  return 0;
+}
+
+uint8_t read_holding_registers( uint8_t id, uint16_t address, uint16_t numreg )
 {
   unsigned int crc16;
 
@@ -24,17 +49,44 @@ unsigned int readholdingregister( unsigned char id, unsigned int address, unsign
   frame[6] = crc16 >> 8;     // crc Hi
   frame[7] = crc16 & 0xFF;   // crc Lo
 
-  uart_write_bytes( UART_NUM_2, frame, 8 );
-  ESP_LOGI(MODBUS_TAG, "readholdingregister");
+  uart_write_bytes( UART_NUM_2, (char*)frame, 8 );
+  ESP_LOGI(MODBUS_TAG, "FC #03 Read holding registers");
 
   return 0;
 }
 
-
-unsigned int calculateCRC(unsigned char bufferSize)
+static uint8_t getresponse()
 {
-  unsigned int temp, temp2, flag;
-  unsigned char i, j;
+  uint8_t len;
+  uint16_t crc16;
+
+  len = uart_read_bytes(UART_NUM_2, (uint8_t*)frame, BUFFER_SIZE, 100 / portTICK_RATE_MS);
+
+  switch(frame[1])
+  {
+    case 0x03:
+      crc16 = calculateCRC( 3 + frame[2] ); // id,func,len + len
+    break;
+    case 0x06:
+      crc16 = calculateCRC( 6 ); // Always len 6
+    break;
+    default:
+      return 0;
+  }
+
+  ESP_LOGI(MODBUS_TAG,"CRC in = %01X%01X ut = %02X", frame[len-2],frame[len-1], crc16)
+
+  if( ( crc16 >> 8 ) == frame[len - 2] && ( crc16 & 0xFF ) == frame[len - 1]  )
+    return 1;
+  else
+    return 0;
+
+}
+
+static uint16_t calculateCRC(uint8_t bufferSize)
+{
+  uint16_t temp, temp2, flag;
+  uint8_t i, j;
 
   temp = 0xFFFF;
   for( i = 0; i < bufferSize; i++)
@@ -136,47 +188,29 @@ static void uart_init( uart_port_t uart, gpio_num_t txpin, gpio_num_t rxpin )
   xTaskCreate(uart_event_task, "uart2_event_task", 2048, NULL, 12, NULL);
 }
 
-unsigned char getresponse()
-{
-  unsigned char i;
-  unsigned char byte;
-  unsigned int crc16;
-  uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
-
-  int len = uart_read_bytes(UART_NUM_2, data, BUF_SIZE, 100 / portTICK_RATE_MS);
-
-  for(i=0;i<len;i++)
-  {
-    frame[i] = *(data+i);
-  }
-
-  /*
-  i = 0;
-  while( !mira_uart_receive_buffer_is_empty() )
-  {
-    byte = mira_uart_receive_byte();
-    frame[i++] = byte;
-  }
-  */
-
-  crc16 = calculateCRC( 3 + frame[2] ); // id,func,len + len
-
-  if( ( crc16 >> 8 ) == frame[i - 2] && ( crc16 & 0xFF ) == frame[i - 1]  )
-    return 1;
-  else
-
-    return 0;
-
-}
-
 void modbus_task(void *pvParameter)
 {
+  static uint16_t counter = 0;
   ESP_LOGI(MODBUS_TAG, "Modbus task started.");
   uart_init(UART_NUM_2, GPIO_NUM_10, GPIO_NUM_9);
 
+  vTaskDelay(5000/portTICK_PERIOD_MS);
+
   while( 1 )
   {
-    readholdingregister( 0x05, 0x00, 0x03 );
+
+    preset_single_register(0x05, 0x01, counter++);
+    vTaskDelay(100/portTICK_PERIOD_MS);
+
+    if( getresponse() )
+    {
+      ESP_LOGI(MODBUS_TAG,"Preset ok!");
+    }
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+
+    read_holding_registers(0x05, 0x00, 0x03 );
+    vTaskDelay(100/portTICK_PERIOD_MS);
+
     if( getresponse() )
     {
       modbus_register[0] = (uint16_t)frame[3] << 8 | (uint16_t)frame[4];
