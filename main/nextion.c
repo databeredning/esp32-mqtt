@@ -10,6 +10,9 @@ const char *NEXTION_TAG = "NEXTION";
 static QueueHandle_t uart1_queue;
 QueueHandle_t xQueue_nextion;
 
+nextion_config display_config;
+uint8_t rx[64];
+
 void nextion_set_status_txt( const char *reg, const char *val )
 {
   char tx[32];
@@ -96,68 +99,54 @@ void nextion_req_status_txt()
     nextion_send_buff( tx, strlen( tx ) );
 }
 
-uint8_t nextion_handle_req_config_txt( nextion_config *config )
+uint8_t nextion_handle_uart_data_event(uint8_t buffered_size)
 {
-/*
-  char rx[32];
-  char * p;
-  char * c;
-  uint8_t i;
-  uint8_t som = 0;
-  uint8_t in;
-  uint8_t v = 0;
-  char var[4][8];
+  uint8_t len;
+  static uint8_t som = 0;
+  static uint8_t ri = 0;
+  uint8_t data[64];
 
-  while( !mira_uart_receive_buffer_is_empty() )
+  len = uart_read_bytes(UART_NUM_1, data, sizeof(data), 100 / portTICK_RATE_MS);
+
+  if(len)
+    ESP_LOGI(NEXTION_TAG,"buffered_size = %d uart_read_bytes = %d", buffered_size, len);
+
+  for(int i = 0; i < len; i++)
   {
-    in = mira_uart_receive_byte();
-
     if( som )
     {
-      if( in == 0x03 )
+      if( data[i] == 0x03 )
       {
-        rx[i] = '\0';
-        p = rx;
-        c = p;
-        while( *p )
-        {
-          if( *p == ' ' )
-          {
-            *p = '\0';
-            strcpy( var[v], c );
-            v++;
-            c = p + 1;
-          }
-          p++;
-        }
-        strcpy( (char*)config->SV, var[0] );
-        strcpy( (char*)config->MaxOnTime, var[1] );
-        strcpy( (char*)config->MaxOffTime, var[2] );
-        strcpy( (char*)config->Mode, var[3] );
+        som = 0;
+        rx[ri] = '\0';
+        ESP_LOGI(NEXTION_TAG,"rx = '%s'", rx);
+        //sscanf( (const char)rx, "%s %s %s %s ", display_config.SV, display_config.MaxOnTime, display_config.MaxOffTime, display_config.Mode);
+        ESP_LOGI(NEXTION_TAG,"SV         = %s", display_config.SV);
+        ESP_LOGI(NEXTION_TAG,"MaxOnTime  = %s", display_config.MaxOnTime);
+        ESP_LOGI(NEXTION_TAG,"MinOffTime = %s", display_config.MaxOffTime);
+        ESP_LOGI(NEXTION_TAG,"Mode       = %s", display_config.Mode);
         return 1;
       }
       else
       {
-        rx[i++] = in;
+        rx[ri++] = data[i];
       }
     }
 
-    if( in == 0x02 )
+    if( data[i] == 0x02 )
     {
-      i = 0;
       som = 1;
+      ri = 0;
     }
   }
-*/
-  return 0;
 
+  return 0;
 }
 
 static void uart_event_task(void *pvParameters)
 {
     uart_event_t event;
     size_t buffered_size;
-    uint8_t* dtmp = (uint8_t*) malloc(BUF_SIZE);
 
     ESP_LOGI(NEXTION_TAG, "UART 1 event task started.");
 
@@ -172,7 +161,10 @@ static void uart_event_task(void *pvParameters)
                 in this example, we don't process data in event, but read data outside.*/
                 case UART_DATA:
                     uart_get_buffered_data_len(UART_NUM_1, &buffered_size);
-                    ESP_LOGI(NEXTION_TAG, "data, len: %d; buffered len: %d", event.size, buffered_size);
+//                    ESP_LOGI(NEXTION_TAG, "UART_NUM_1 data len: %d; buffered len: %d", event.size, buffered_size);
+//                    if(event.size > 0)
+                    if(buffered_size> 0)
+                      nextion_handle_uart_data_event(buffered_size);
                     break;
                 //Event of HW FIFO overflow detected
                 case UART_FIFO_OVF:
@@ -211,8 +203,6 @@ static void uart_event_task(void *pvParameters)
             }
         }
     }
-    free(dtmp);
-    dtmp = NULL;
     vTaskDelete(NULL);
 }
 
@@ -252,13 +242,13 @@ void nextion_task(void *pvParameter)
   // Make sure init finishes before we go on.
   vTaskDelay(50 / portTICK_PERIOD_MS);
 
-  uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
+  //uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
 
   while(1)
   {
-    int len;
-    //if(xQueueReceive(xQueue_nextion, &nextion_message, pdMS_TO_TICKS(100)))
+    //int len;
     if(xQueueReceive(xQueue_nextion, &nextion_message, (portTickType)portMAX_DELAY))
+    //if(xQueueReceive(xQueue_nextion, &nextion_message, pdMS_TO_TICKS(500)))
     {
       ESP_LOGI(NEXTION_TAG,"Message received! %d", nextion_message.id);
       uart_flush(UART_NUM_1);
@@ -266,34 +256,11 @@ void nextion_task(void *pvParameter)
       {
         case SET_STATUS_TEXT:
           nextion_set_status_txt(nextion_message.var, nextion_message.value);
-          // Read out result from Nextion
-          len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
         break;
         case GET_CONFIG_TEXT:
-          nextion_get_config_txt(nextion_message.var );
-          // Read out result from Nextion
-          vTaskDelay( 50 / portTICK_PERIOD_MS);
-          len = uart_read_bytes(UART_NUM_1, data, BUF_SIZE, 100 / portTICK_RATE_MS);
-          *(data+len) = '\0';
-          if(!strcmp("SV",nextion_message.var))
-          {
-            ESP_LOGI(NEXTION_TAG,"SV = %s", data );
-          }
-          else if(!strcmp("MaxOnTime",nextion_message.var))
-          {
-            ESP_LOGI(NEXTION_TAG,"MaxOnTime = %s", data );
-          }
-          else if(!strcmp("MaxOffTime",nextion_message.var))
-          {
-            ESP_LOGI(NEXTION_TAG,"MaxOffTime = %s", data );
-          }
-          else if(!strcmp("Mode",nextion_message.var))
-          {
-            ESP_LOGI(NEXTION_TAG,"Mode = %s", data );
-          }
-        break;
         case GET_STATUS_TEXT:
         case SET_CONFIG_TEXT:
+          nextion_req_config_txt();
         break;
       }
     }

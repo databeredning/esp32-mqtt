@@ -388,15 +388,16 @@ void app_main()
   xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
   xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
   xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
-  xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
+  //xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
 
   inet_aton("127.0.0.1", &dbnode.ip_addr);
   wifi_conn_init();
 
   while(1)
   {
-    sprintf(temperature,"%3.1f", DS_get_temp());
+    //sprintf(temperature,"%3.1f", DS_get_temp());
     //send_to_nextion_task( SET_STATUS_TEXT, "PV", temperature);
-    vTaskDelay(1000/portTICK_PERIOD_MS);
+    send_to_nextion_task(GET_CONFIG_TEXT, "", "");
+    vTaskDelay(3000/portTICK_PERIOD_MS);
   }
 }

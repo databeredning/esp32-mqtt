@@ -3,6 +3,6 @@
 # project subdirectory.
 #
 VERBOSE = 1
-PROJECT_NAME := esp32-audio-code-idf
+PROJECT_NAME := dbnode
 include $(IDF_PATH)/make/project.mk
 
