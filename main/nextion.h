@@ -53,6 +53,8 @@ typedef struct
 
 extern QueueHandle_t xQueue_nextion;
 
+extern nextion_config display_config;
+
 void    nextion_task(void *pvParameter);
 uint8_t nextion_init( void );
 

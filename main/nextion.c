@@ -11,7 +11,7 @@ static QueueHandle_t uart1_queue;
 QueueHandle_t xQueue_nextion;
 
 nextion_config display_config;
-uint8_t rx[64];
+char rx[64];
 
 void nextion_set_status_txt( const char *reg, const char *val )
 {
@@ -105,11 +105,12 @@ uint8_t nextion_handle_uart_data_event(uint8_t buffered_size)
   static uint8_t som = 0;
   static uint8_t ri = 0;
   uint8_t data[64];
+  char * p;
+  char * c;
+  uint8_t v = 0;
+  char var[4][8];
 
   len = uart_read_bytes(UART_NUM_1, data, sizeof(data), 100 / portTICK_RATE_MS);
-
-  if(len)
-    ESP_LOGI(NEXTION_TAG,"buffered_size = %d uart_read_bytes = %d", buffered_size, len);
 
   for(int i = 0; i < len; i++)
   {
@@ -119,12 +120,26 @@ uint8_t nextion_handle_uart_data_event(uint8_t buffered_size)
       {
         som = 0;
         rx[ri] = '\0';
-        ESP_LOGI(NEXTION_TAG,"rx = '%s'", rx);
-        //sscanf( (const char)rx, "%s %s %s %s ", display_config.SV, display_config.MaxOnTime, display_config.MaxOffTime, display_config.Mode);
-        ESP_LOGI(NEXTION_TAG,"SV         = %s", display_config.SV);
-        ESP_LOGI(NEXTION_TAG,"MaxOnTime  = %s", display_config.MaxOnTime);
-        ESP_LOGI(NEXTION_TAG,"MinOffTime = %s", display_config.MaxOffTime);
-        ESP_LOGI(NEXTION_TAG,"Mode       = %s", display_config.Mode);
+        //ESP_LOGI(NEXTION_TAG,"rx = '%s'", rx);
+
+        p = rx;
+        c = p;
+        while( *p )
+        {
+          if( *p == ' ' )
+          {
+            *p = '\0';
+            strcpy(var[v], c );
+            v++;
+            c = p + 1;
+          }
+          p++;
+        }
+        strcpy((char*)display_config.SV, var[0]);
+        strcpy((char*)display_config.MaxOnTime, var[1]);
+        strcpy((char*)display_config.MaxOffTime, var[2]);
+        strcpy((char*)display_config.Mode, var[3]);
+
         return 1;
       }
       else
@@ -132,12 +147,16 @@ uint8_t nextion_handle_uart_data_event(uint8_t buffered_size)
         rx[ri++] = data[i];
       }
     }
-
-    if( data[i] == 0x02 )
+    else if( data[i] == 0x02 )
     {
       som = 1;
       ri = 0;
     }
+    else
+    {
+      //ESP_LOGI(NEXTION_TAG,"UART data[%d] = %02X", i, data[i]);
+    }
+
   }
 
   return 0;
@@ -242,16 +261,11 @@ void nextion_task(void *pvParameter)
   // Make sure init finishes before we go on.
   vTaskDelay(50 / portTICK_PERIOD_MS);
 
-  //uint8_t* data = (uint8_t*) malloc(BUF_SIZE);
-
   while(1)
   {
-    //int len;
     if(xQueueReceive(xQueue_nextion, &nextion_message, (portTickType)portMAX_DELAY))
-    //if(xQueueReceive(xQueue_nextion, &nextion_message, pdMS_TO_TICKS(500)))
     {
-      ESP_LOGI(NEXTION_TAG,"Message received! %d", nextion_message.id);
-      uart_flush(UART_NUM_1);
+      //ESP_LOGI(NEXTION_TAG,"Message received! %d", nextion_message.id);
       switch(nextion_message.id)
       {
         case SET_STATUS_TEXT:

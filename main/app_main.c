@@ -36,8 +36,9 @@ static TaskHandle_t xNextionTask = NULL;
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
 
+static config_node node;
 
-node_runtime dbnode =
+runtime_node dbnode =
 {
   .client = NULL,
   .blink_intervall = 200,
@@ -186,6 +187,257 @@ void blink_task(void *pvParameter)
   }
 }
 
+uint16_t DDdd_to_NNNN( char *val )
+{
+  char res[5];
+  char *p;
+  char dp;
+  int  len;
+
+  len = strlen( val );
+  p = strchr( (char *)val, '.' );
+  if( p != NULL )
+  {
+    dp = p - (char*)val; // Get position in string
+
+    switch( dp )
+    {
+      case 1:
+        res[0] = '0';
+        res[1] = *( val + 0 );
+        res[2] = *( val + 2 );
+        if( len == 4 )
+        {
+          res[3] = *( val + 3 );
+          res[4] = '\0';
+        }
+        else // len == 3
+        {
+          res[3] = '0';
+          res[4] = '\0';
+        }
+        break;
+      case 2:
+        res[0] = *( val + 0 );
+        res[1] = *( val + 1 );
+        res[2] = *( val + 3 );
+        res[3] = '0';
+        res[4] = '\0';
+        break;
+    }
+  }
+  else
+  {
+    sprintf( res, "%s00", (char*)val );  // No decimal point
+  }
+  return atoi( res );
+}
+
+const char * NNNN_to_DDdd( uint16_t val )
+{
+  static char str[8];
+
+  uint16_t i = val / 100;
+  uint16_t d = ( val  - ( i * 100 ) ) / 10;
+  sprintf( str,"%d.%d", i, d );
+
+  return str;
+}
+
+uint8_t get_current_register_values()
+{
+  uint8_t result;
+  uint8_t c;
+
+  result = 0;
+  c = 0b00000001; // Set Value
+
+  if( display_config.SV[0] == '#' || !strlen(display_config.SV) )
+  {
+    ESP_LOGI(MAIN_TAG,"DEBUG: Override default #### with %s", NNNN_to_DDdd( node.pid.sv ) );
+    send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
+  }
+  else
+  {
+    // Check if SV has been changed on the panel.
+    if( DDdd_to_NNNN( display_config.SV ) != node.pid.sv )
+    {
+      //printf("display_config.SV = '%s' != node.pid.sv = %d \n", display_config.SV, node.pid.sv );
+      node.pid.sv = DDdd_to_NNNN( display_config.SV );
+    }
+  }
+
+  if( dbnode.analog.curval[REG_SV] != node.pid.sv )
+  {
+    dbnode.analog.curval[REG_SV] = node.pid.sv;
+    result += c;
+    send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
+    //runtime.save_timeout = clock_seconds() + 10;
+  }
+/*
+#endif
+#ifdef DS2482
+  c = 0b00000010; // Process Value
+  if( iobox.reg.curval[REG_PV] != curtemp )
+  {
+    iobox.reg.curval[REG_PV] = curtemp;
+    // Supress to fast update if value toggles up/down rapidly
+    result += c;
+#ifdef NEXTION
+    COMSELECT_LCD;
+    nextion_set_status_txt( "PV", NNNN_to_DDdd( curtemp ) );
+#endif
+  }
+#endif
+
+#ifdef THERMOSTAT
+  c = 0b00000100; // Mode flag
+#ifdef NEXTION
+  switch( node.pid.mode )
+  {
+    case THERMOSTAT_MANUAL:
+      sprintf( nextion_str,"Manual" );
+      break;
+    case THERMOSTAT_AUTO:
+      sprintf( nextion_str,"OnOff" );
+      break;
+  }
+  if( display_config.Mode[0] == '#' || !strlen(display_config.Mode) )
+  {
+    printf("DEBUG: Override default #### with %s\n", nextion_str );
+    COMSELECT_LCD;
+    nextion_set_config_txt( "Mode", nextion_str );
+  }
+  else
+  {
+    // Check if Mode has been changed on the panel.
+    if( strcmp( display_config.Mode, nextion_str ) )
+    {
+      //printf("display_config.Mode = '%s' != node.pid.mode = '%s' \n", display_config.Mode, nextion_str );
+      if( !strcmp( display_config.Mode, "Manual" ) )
+      {
+        node.pid.mode = THERMOSTAT_MANUAL;
+        sprintf( nextion_str,"Manual" );               // Change nextion_str to reflect new value
+      }
+      if( !strcmp( display_config.Mode, "OnOff" ) )
+      {
+        node.pid.mode = THERMOSTAT_AUTO;
+        sprintf( nextion_str,"OnOff" );
+      }
+    }
+  }
+#endif
+
+  if( iobox.reg.curval[REG_MODE] != node.pid.mode )
+  {
+    iobox.reg.curval[REG_MODE] = node.pid.mode;
+    result += c;
+#ifdef NEXTION
+    COMSELECT_LCD;
+    nextion_set_status_txt( "Mode", nextion_str );
+#endif
+    runtime.save_timeout = clock_seconds() + 10;
+  }
+
+
+  c = 0b00001000; // MAX ON
+#ifdef NEXTION
+  sprintf( nextion_str,"%d", node.max_on );
+  if( display_config.MaxOnTime[0] == '#' || !strlen(display_config.MaxOnTime) )
+  {
+    printf("DEBUG: Override default #### with %s\n", nextion_str );
+    COMSELECT_LCD;
+    nextion_set_config_txt( "MaxOnTime", nextion_str );
+  }
+  else
+  {
+    // Check if MaxOnTime has been changed on the panel.
+    if( strcmp( display_config.MaxOnTime, nextion_str ) )
+    {
+      //printf("display_config.MaxOnTime = '%s' != node.max_on = '%s' \n", display_config.MaxOnTime, nextion_str );
+      node.max_on = atoi( display_config.MaxOnTime );
+      printf("atoi( display_config.MaxOnTime ) = %d\n", node.max_on);
+    }
+  }
+#endif
+
+  if( iobox.reg.curval[REG_MAX_ON] != node.max_on )
+  {
+    iobox.reg.curval[REG_MAX_ON] = node.max_on;
+    result += c;
+#ifdef NEXTION
+    sprintf( nextion_str,"%d", node.max_on );
+    COMSELECT_LCD;
+    nextion_set_status_txt( "MaxOnTime", nextion_str );
+#endif
+    runtime.save_timeout = clock_seconds() + 10;
+  }
+
+  c = 0b00010000; // MAX OFF
+#ifdef NEXTION
+  sprintf( nextion_str,"%d", node.max_off );
+  if( display_config.MaxOffTime[0] == '#' || !strlen(display_config.MaxOffTime) )
+  {
+    printf("DEBUG: Override default #### with %s\n", nextion_str );
+    COMSELECT_LCD;
+    nextion_set_config_txt( "MaxOffTime", nextion_str );
+  }
+  else
+  {
+    // Check if MaxOffTime has been changed on the panel.
+    if( strcmp( display_config.MaxOffTime, nextion_str ) )
+    {
+      //printf("display_config.MaxOffTime = '%s' != node.max_off = '%s' \n", display_config.MaxOffTime, nextion_str );
+      node.max_off = atoi( display_config.MaxOffTime );
+      printf("atoi( display_config.MaxOffTime ) = %d\n", node.max_off);
+    }
+  }
+#endif
+  if( iobox.reg.curval[REG_MAX_OFF] != node.max_off )
+  {
+    iobox.reg.curval[REG_MAX_OFF] = node.max_off;
+    result += c;
+#ifdef NEXTION
+    sprintf( nextion_str,"%d", node.max_off );
+    COMSELECT_LCD;
+    nextion_set_status_txt( "MaxOffTime", nextion_str );
+#endif
+  }
+
+  c = 0b00100000; // Hysteresis PID output
+  if( iobox.reg.curval[REG_HYST] != node.hysteresis )
+  {
+    iobox.reg.curval[REG_HYST] = node.hysteresis;
+    result += c;
+    runtime.save_timeout = clock_seconds() + 10;
+  }
+#endif
+*/
+/*
+#ifdef MODBUS
+  c = 0b00100000;
+  if( iobox.reg.curval[REG_MODB_1] != modbus_register[0] )
+  {
+    iobox.reg.curval[REG_MODB_1] = modbus_register[0];
+    result += c;
+  }
+  c = c << 1;
+  if( iobox.reg.curval[REG_MODB_2] != modbus_register[1] )
+  {
+    iobox.reg.curval[REG_MODB_2] = modbus_register[1];
+    result += c;
+  }
+  c = c << 1;
+  if( iobox.reg.curval[REG_MODB_3] != modbus_register[2] )
+  {
+    iobox.reg.curval[REG_MODB_3] = modbus_register[2];
+    result += c;
+  }
+#endif
+*/
+  return result;
+}
+
 uint8_t get_current_inputs(void)
 {
   uint8_t result = 0;
@@ -230,37 +482,53 @@ static const char *byte_to_binary(uint8_t x)
   return b;
 }
 
+void scan(void)
+{
+  uint8_t newflag;
+  // input IO
+  dbnode.input.curflag = get_current_inputs();
+  newflag = dbnode.input.curflag ^ dbnode.input.ackflag;
+  if( newflag )
+  {
+    dbnode.input.newflag |= newflag;
+    return;
+  }
+  // output IO
+  dbnode.output.curflag = get_current_outputs();
+  newflag = dbnode.output.curflag ^ dbnode.output.ackflag;
+  if( newflag )
+  {
+    dbnode.output.newflag |= newflag;
+    return;
+  }
+  // status flags
+  newflag = dbnode.status.curflag ^ dbnode.status.ackflag;
+  if(newflag)
+  {
+    dbnode.status.newflag |= newflag;
+    return;
+  }
+  // analog registers
+  dbnode.analog.curflag = get_current_register_values();
+  newflag = dbnode.analog.curflag ^ dbnode.analog.ackflag;
+  if(newflag)
+  {
+    dbnode.analog.newflag |= newflag;
+    return;
+  }
+}
+
 static void scan_task(void *pvParameter)
 {
   char topic[64];
-  uint8_t newflag;
   uint8_t c;
   uint8_t i;
 
   while(true)
   {
-    // Scan for changes
-    dbnode.input.curflag = get_current_inputs();
-    newflag = dbnode.input.curflag ^ dbnode.input.ackflag;
-    if( newflag )
-    {
-      dbnode.input.newflag |= newflag;
-    }
-
-    dbnode.output.curflag = get_current_outputs();
-    newflag = dbnode.output.curflag ^ dbnode.output.ackflag;
-    if( newflag )
-    {
-      dbnode.output.newflag |= newflag;
-    }
-
-    newflag = dbnode.status.curflag ^ dbnode.status.ackflag;
-    if(newflag)
-    {
-      dbnode.status.newflag |= newflag;
-    }
-
     // Get data to send but send only one change / cycle
+    scan();
+
     if(dbnode.input.newflag)
     {
       sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
@@ -284,8 +552,21 @@ static void scan_task(void *pvParameter)
       dbnode.output.ackflag |= dbnode.output.curflag & c;
       dbnode.output.newflag &= ~c;
     }
-
-
+    else if(dbnode.analog.newflag)
+    {
+      c = 1;
+      for( i = 1; i <= 8; i++ )
+      {
+        if( dbnode.analog.newflag & c )
+        {
+          sprintf(topic,"/dbnode/%s/analog/%d", inet_ntoa(dbnode.ip_addr), i);
+          if( dbnode.client != NULL )
+            mqtt_publish(dbnode.client, topic, dbnode.analog.curval[i-1], strlen(dbnode.analog.curval[i-1]), 0, 0);
+        }
+        c = c << 1;
+      }
+    }
+    // Update status every cycle
     if(dbnode.status.newflag)
     {
       c = 1;
@@ -370,13 +651,14 @@ void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const
   nextion_message.id = id;
   strcpy(nextion_message.var, var);
   strcpy(nextion_message.value,value);
-  xQueueSend( xQueue_nextion, &nextion_message, ( TickType_t ) 0 );
+
+  if(xQueue_nextion)
+    xQueueSend( xQueue_nextion, &nextion_message, ( TickType_t ) 0 );
 
 }
 
 void app_main()
 {
-  char buffer[64];
   char temperature[5];
 
   ESP_LOGI(MAIN_TAG, "[APP] Startup..");
@@ -395,9 +677,9 @@ void app_main()
 
   while(1)
   {
-    //sprintf(temperature,"%3.1f", DS_get_temp());
-    //send_to_nextion_task( SET_STATUS_TEXT, "PV", temperature);
+    sprintf(temperature,"%3.1f", DS_get_temp());
+    send_to_nextion_task(SET_STATUS_TEXT, "PV", temperature);
     send_to_nextion_task(GET_CONFIG_TEXT, "", "");
-    vTaskDelay(3000/portTICK_PERIOD_MS);
+    vTaskDelay(1000/portTICK_PERIOD_MS);
   }
 }
