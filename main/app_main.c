@@ -58,7 +58,7 @@ void connected_cb(void *self, void *params)
 {
   ESP_LOGI(MAIN_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
-  mqtt_subscribe(client, "/dbnode/+/set/#", 0);
+  mqtt_subscribe(client, "/dbnode/+/+/#", 0);
   dbnode.blink_intervall = 1000;
 }
 void disconnected_cb(void *self, void *params)
@@ -112,6 +112,7 @@ void data_cb(void *self, void *params)
 static void parse_mqtt_message( char *topic, char *payload)
 {
   char * token;
+  uint16_t value;
 
   token = strtok(topic, "/" );
   if(strcmp(token, "dbnode" ))
@@ -134,6 +135,24 @@ static void parse_mqtt_message( char *topic, char *payload)
         break;
         case 33:
           gpio_set_level(GPIO_NUM_33, payload[0] == '1' ? 1 : 0);
+        break;
+        default:
+          ESP_LOGE("DBNODE","Undefined output request!");
+      }
+    }
+  }
+  else if(!strcmp(token, "analog"))
+  {
+    ESP_LOGI(MAIN_TAG,"analog '%s'", payload);
+    value = atoi(payload);
+    if( value >= 0 && value <= 9999 )
+    {
+      token = strtok( NULL, "/" );
+      switch (atoi(token))
+      {
+        case 1:
+          node.pid.sv = value;
+          ESP_LOGI(MAIN_TAG,"node.pid.sv = %d", node.pid.sv);
         break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
@@ -254,7 +273,7 @@ uint8_t get_current_register_values()
 
   if( display_config.SV[0] == '#' || !strlen(display_config.SV) )
   {
-    ESP_LOGI(MAIN_TAG,"DEBUG: Override default #### with %s", NNNN_to_DDdd( node.pid.sv ) );
+    ESP_LOGI(MAIN_TAG,"DEBUG: Override default ####/strlen=0 with %s", NNNN_to_DDdd( node.pid.sv ) );
     send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
   }
   else
@@ -269,6 +288,7 @@ uint8_t get_current_register_values()
 
   if( dbnode.analog.curval[REG_SV] != node.pid.sv )
   {
+    ESP_LOGI(MAIN_TAG,"SET_STATUS_TEXT SV=%d",node.pid.sv);
     dbnode.analog.curval[REG_SV] = node.pid.sv;
     result += c;
     send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
@@ -521,6 +541,7 @@ void scan(void)
 static void scan_task(void *pvParameter)
 {
   char topic[64];
+  char value[32];
   uint8_t c;
   uint8_t i;
 
@@ -531,11 +552,12 @@ static void scan_task(void *pvParameter)
 
     if(dbnode.input.newflag)
     {
-      sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
       if( dbnode.client != NULL )
+      {
+        sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
         mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.input.curflag), 8, 0, 0);
+      }
       // Clear ack- and newflag immediately, don't wait for ACK from server
-
       c = 0b00000001; // Mask for used bits
       dbnode.input.ackflag &= ~c;
       dbnode.input.ackflag |= dbnode.input.curflag & c;
@@ -543,10 +565,11 @@ static void scan_task(void *pvParameter)
     }
     else if(dbnode.output.newflag)
     {
-      sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(dbnode.ip_addr));
       if( dbnode.client != NULL )
+      {
+        sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(dbnode.ip_addr));
         mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.output.curflag), 8, 0, 0);
-
+      }
       c = 0b00000011; // Mask for used bits
       dbnode.output.ackflag &= ~c;
       dbnode.output.ackflag |= dbnode.output.curflag & c;
@@ -559,9 +582,15 @@ static void scan_task(void *pvParameter)
       {
         if( dbnode.analog.newflag & c )
         {
-          sprintf(topic,"/dbnode/%s/analog/%d", inet_ntoa(dbnode.ip_addr), i);
           if( dbnode.client != NULL )
-            mqtt_publish(dbnode.client, topic, dbnode.analog.curval[i-1], strlen(dbnode.analog.curval[i-1]), 0, 0);
+          {
+            sprintf(value,"%d",dbnode.analog.curval[i-1]);
+            sprintf(topic,"/dbnode/%s/analog/%d", inet_ntoa(dbnode.ip_addr), i);
+            mqtt_publish(dbnode.client, topic, value, strlen(value), 0, 0);
+          }
+          dbnode.analog.ackflag &= ~c;
+          dbnode.analog.ackflag |= dbnode.analog.curflag & c;
+          dbnode.analog.newflag &= ~c;
         }
         c = c << 1;
       }
