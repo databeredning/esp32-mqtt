@@ -271,10 +271,14 @@ void nextion_task(void *pvParameter)
         case SET_STATUS_TEXT:
           nextion_set_status_txt(nextion_message.var, nextion_message.value);
         break;
-        case GET_CONFIG_TEXT:
-        case GET_STATUS_TEXT:
         case SET_CONFIG_TEXT:
+          nextion_set_config_txt(nextion_message.var, nextion_message.value);
+        break;
+        case GET_CONFIG_TEXT:
           nextion_req_config_txt();
+        break;
+        case GET_STATUS_TEXT:
+          // Not implemneted yet
         break;
       }
     }

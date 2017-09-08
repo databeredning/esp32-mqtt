@@ -49,6 +49,7 @@ runtime_node dbnode =
 
 // == Private function prototypes ==============================
 
+const char * NNNN_to_DDdd( uint16_t val );
 void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const char* value );
 static void parse_mqtt_message( char *topic, char *payload);
 
@@ -56,9 +57,11 @@ static void parse_mqtt_message( char *topic, char *payload);
 
 void connected_cb(void *self, void *params)
 {
+  char topic[32];
   ESP_LOGI(MAIN_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
-  mqtt_subscribe(client, "/dbnode/+/+/#", 0);
+  sprintf(topic,"/dbnode/%s/+/#", inet_ntoa(dbnode.ip_addr));
+  mqtt_subscribe(client, topic, 0);
   dbnode.blink_intervall = 1000;
 }
 void disconnected_cb(void *self, void *params)
@@ -85,7 +88,7 @@ void data_cb(void *self, void *params)
     char *topic = malloc(event_data->topic_length + 1);
     memcpy(topic, event_data->topic, event_data->topic_length);
     topic[event_data->topic_length] = 0;
-    ESP_LOGI(MAIN_TAG, "[APP] Publish topic: %s", topic);
+    ESP_LOGI(MAIN_TAG, "[APP] MQTT topic received: %s", topic);
 
     char *payload = malloc(event_data->data_length + 1);
     memcpy(payload, event_data->data, event_data->data_length);
@@ -96,16 +99,6 @@ void data_cb(void *self, void *params)
     free(payload);
     free(topic);
   }
-
-  // char *data = malloc(event_data->data_length + 1);
-  // memcpy(data, event_data->data, event_data->data_length);
-  // data[event_data->data_length] = 0;
-  ESP_LOGI(MAIN_TAG, "[APP] Publish data[%d/%d bytes]",
-             event_data->data_length + event_data->data_offset,
-             event_data->data_total_length);
-  // data);
-
-  // free(data);
 
 }
 
@@ -141,18 +134,18 @@ static void parse_mqtt_message( char *topic, char *payload)
       }
     }
   }
-  else if(!strcmp(token, "analog"))
+  else if(!strcmp(token, "setreg"))
   {
-    ESP_LOGI(MAIN_TAG,"analog '%s'", payload);
     value = atoi(payload);
-    if( value >= 0 && value <= 9999 )
+    if( value <= 9999 )
     {
       token = strtok( NULL, "/" );
+      ESP_LOGI(MAIN_TAG,"/dbnode/%s/setreg/%s '%s'", inet_ntoa(dbnode.ip_addr), token, payload);
       switch (atoi(token))
       {
         case 1:
           node.pid.sv = value;
-          ESP_LOGI(MAIN_TAG,"node.pid.sv = %d", node.pid.sv);
+          send_to_nextion_task(SET_CONFIG_TEXT, "SV", NNNN_to_DDdd( value ) );
         break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
@@ -273,15 +266,15 @@ uint8_t get_current_register_values()
 
   if( display_config.SV[0] == '#' || !strlen(display_config.SV) )
   {
-    ESP_LOGI(MAIN_TAG,"DEBUG: Override default ####/strlen=0 with %s", NNNN_to_DDdd( node.pid.sv ) );
-    send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
+    ESP_LOGI(MAIN_TAG,"DEBUG: Override default '%s' with '%s'", display_config.SV, NNNN_to_DDdd( node.pid.sv ) );
+    send_to_nextion_task(SET_CONFIG_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
   }
   else
   {
     // Check if SV has been changed on the panel.
     if( DDdd_to_NNNN( display_config.SV ) != node.pid.sv )
     {
-      //printf("display_config.SV = '%s' != node.pid.sv = %d \n", display_config.SV, node.pid.sv );
+      ESP_LOGI(MAIN_TAG,"display_config.SV = '%s' != node.pid.sv = %d", display_config.SV, node.pid.sv);
       node.pid.sv = DDdd_to_NNNN( display_config.SV );
     }
   }
@@ -291,7 +284,7 @@ uint8_t get_current_register_values()
     ESP_LOGI(MAIN_TAG,"SET_STATUS_TEXT SV=%d",node.pid.sv);
     dbnode.analog.curval[REG_SV] = node.pid.sv;
     result += c;
-    send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
+    send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ));
     //runtime.save_timeout = clock_seconds() + 10;
   }
 /*
@@ -533,6 +526,9 @@ void scan(void)
   newflag = dbnode.analog.curflag ^ dbnode.analog.ackflag;
   if(newflag)
   {
+    ESP_LOGI(MAIN_TAG,"dbnode.analog.newflag |= newflag %s", byte_to_binary(dbnode.analog.newflag));
+    ESP_LOGI(MAIN_TAG,"dbnode.analog.curflag            %s", byte_to_binary(dbnode.analog.curflag));
+    ESP_LOGI(MAIN_TAG,"dbnode.analog.ackflag            %s", byte_to_binary(dbnode.analog.ackflag));
     dbnode.analog.newflag |= newflag;
     return;
   }
@@ -588,8 +584,8 @@ static void scan_task(void *pvParameter)
             sprintf(topic,"/dbnode/%s/analog/%d", inet_ntoa(dbnode.ip_addr), i);
             mqtt_publish(dbnode.client, topic, value, strlen(value), 0, 0);
           }
-          dbnode.analog.ackflag &= ~c;
-          dbnode.analog.ackflag |= dbnode.analog.curflag & c;
+          //dbnode.analog.ackflag &= ~c;
+          //dbnode.analog.ackflag |= dbnode.analog.curflag & c;
           dbnode.analog.newflag &= ~c;
         }
         c = c << 1;
@@ -708,6 +704,7 @@ void app_main()
   {
     sprintf(temperature,"%3.1f", DS_get_temp());
     send_to_nextion_task(SET_STATUS_TEXT, "PV", temperature);
+    //ESP_LOGI(MAIN_TAG,"PV = %s", temperature);
     send_to_nextion_task(GET_CONFIG_TEXT, "", "");
     vTaskDelay(1000/portTICK_PERIOD_MS);
   }
