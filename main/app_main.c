@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
+#include "freertos/timers.h"
 
 #include "lwip/sockets.h"
 #include "lwip/dns.h"
@@ -33,6 +34,8 @@ const char *MAIN_TAG = "DBNODE";
 
 static TaskHandle_t xScanTask = NULL;
 static TaskHandle_t xNextionTask = NULL;
+
+static TimerHandle_t xTimerPID;
 
 static EventGroupHandle_t wifi_event_group;
 const static int CONNECTED_BIT = BIT0;
@@ -785,6 +788,11 @@ esp_err_t save_config(void)
   return ESP_OK;
 }
 
+void pid_timer_cb(void)
+{
+  pid_compute( &node.pid, node.pid.sv, get_temperature() );
+}
+
 void app_main()
 {
 
@@ -799,7 +807,6 @@ void app_main()
 
   ESP_LOGI(MAIN_TAG,"node.pid.sv = %d", node.pid.sv);
 
-
   if(node.mode == COLD)
   {
     node.mode = RUN;
@@ -808,11 +815,13 @@ void app_main()
 
   xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
   xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
-
   xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
   //xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
 
   wifi_conn_init();
+
+  xTimerPID = xTimerCreate("PID", 1000/portTICK_PERIOD_MS, pdTRUE, ( void * ) 0, pid_timer_cb );
+  xTimerStart(xTimerPID, 0);
 
   while(1)
   {
