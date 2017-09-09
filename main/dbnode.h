@@ -34,18 +34,18 @@ typedef struct
 typedef struct
 {
   ip4_addr_t ip_addr;
-  mqtt_client *client;
+  mqtt_client *client_mqtt;
   int32_t blink_intervall;
   dio8_t status;
   dio8_t input;
   dio8_t output;
-  aio8_16bit_t analog;
+  aio8_16bit_t reg16;
 } runtime_node;
 
 
 typedef struct
 {
-  uint16_t   mode;            // Mode node
+  uint16_t   mode;            // Mode node COLD / RUN
   uint16_t   max_on;
   uint16_t   max_off;
   uint16_t   min_on;

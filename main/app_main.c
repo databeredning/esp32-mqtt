@@ -38,9 +38,9 @@ const static int CONNECTED_BIT = BIT0;
 
 static config_node node;
 
-runtime_node dbnode =
+runtime_node runtime =
 {
-  .client = NULL,
+  .client_mqtt = NULL,
   .blink_intervall = 200,
   .status.newflag = 0b00000001,
   .input.newflag  = 0b00000001,
@@ -49,6 +49,7 @@ runtime_node dbnode =
 
 // == Private function prototypes ==============================
 
+uint16_t get_temperature(void);
 const char * NNNN_to_DDdd( uint16_t val );
 void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const char* value );
 static void parse_mqtt_message( char *topic, char *payload);
@@ -60,14 +61,14 @@ void connected_cb(void *self, void *params)
   char topic[32];
   ESP_LOGI(MAIN_TAG, "[APP] Connected callback!");
   mqtt_client *client = (mqtt_client *)self;
-  sprintf(topic,"/dbnode/%s/+/#", inet_ntoa(dbnode.ip_addr));
+  sprintf(topic,"/dbnode/%s/+/#", inet_ntoa(runtime.ip_addr));
   mqtt_subscribe(client, topic, 0);
-  dbnode.blink_intervall = 1000;
+  runtime.blink_intervall = 1000;
 }
 void disconnected_cb(void *self, void *params)
 {
   ESP_LOGI(MAIN_TAG, "[APP] Disconnected callback!");
-  dbnode.blink_intervall = 500;
+  runtime.blink_intervall = 500;
 }
 void subscribe_cb(void *self, void *params)
 {
@@ -80,7 +81,7 @@ void publish_cb(void *self, void *params)
 void data_cb(void *self, void *params)
 {
 
-  ESP_LOGI(MAIN_TAG, "[APP] Data callback!");
+  //ESP_LOGI(MAIN_TAG, "[APP] Data callback!");
   mqtt_event_data_t *event_data = (mqtt_event_data_t *)params;
 
   if(event_data->data_offset == 0)
@@ -88,11 +89,12 @@ void data_cb(void *self, void *params)
     char *topic = malloc(event_data->topic_length + 1);
     memcpy(topic, event_data->topic, event_data->topic_length);
     topic[event_data->topic_length] = 0;
-    ESP_LOGI(MAIN_TAG, "[APP] MQTT topic received: %s", topic);
 
     char *payload = malloc(event_data->data_length + 1);
     memcpy(payload, event_data->data, event_data->data_length);
     payload[event_data->data_length] = 0;
+
+    ESP_LOGI(MAIN_TAG, "[APP] MQTT topic received: %s %s", topic, payload);
 
     parse_mqtt_message(topic, payload);
 
@@ -112,7 +114,7 @@ static void parse_mqtt_message( char *topic, char *payload)
     return;
 
   token = strtok( NULL, "/" );
-  if(strcmp(token, inet_ntoa(dbnode.ip_addr)))
+  if(strcmp(token, inet_ntoa(runtime.ip_addr)))
     return;
 
   token = strtok( NULL, "/" );
@@ -140,12 +142,25 @@ static void parse_mqtt_message( char *topic, char *payload)
     if( value <= 9999 )
     {
       token = strtok( NULL, "/" );
-      ESP_LOGI(MAIN_TAG,"/dbnode/%s/setreg/%s '%s'", inet_ntoa(dbnode.ip_addr), token, payload);
+      ESP_LOGI(MAIN_TAG,"/dbnode/%s/setreg/%s '%s'", inet_ntoa(runtime.ip_addr), token, payload);
       switch (atoi(token))
       {
-        case 1:
-          node.pid.sv = value;
+        case 1: // Set value
+          node.pid.sv = value; // Is this necessary to set here?
           send_to_nextion_task(SET_CONFIG_TEXT, "SV", NNNN_to_DDdd( value ) );
+        break;
+        case 2: // Process value ( read only )
+        break;
+        case 3: // PID Mode
+          switch(value)
+          {
+            case 0:
+              send_to_nextion_task(SET_CONFIG_TEXT, "Mode", "Manual" );
+            break;
+            case 1:
+              send_to_nextion_task(SET_CONFIG_TEXT, "Mode", "OnOff" );
+            break;
+          }
         break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
@@ -161,7 +176,6 @@ mqtt_settings settings = {
 #else
     .port = 1883, // unencrypted
 #endif
-    //.client_id = "mqtt_client_id",
     .auto_reconnect = 1,
     .username = "user",
     .password = "pass",
@@ -195,7 +209,7 @@ void blink_task(void *pvParameter)
   {
     gpio_set_level(GPIO_NUM_16, level);
     level = !level;
-    vTaskDelay( dbnode.blink_intervall / portTICK_PERIOD_MS);
+    vTaskDelay( runtime.blink_intervall / portTICK_PERIOD_MS);
   }
 }
 
@@ -258,15 +272,17 @@ const char * NNNN_to_DDdd( uint16_t val )
 
 uint8_t get_current_register_values()
 {
-  uint8_t result;
-  uint8_t c;
+  uint8_t   result;
+  uint8_t   c;
+  char      nextion_str[16];
+  uint16_t  curtemp;
 
   result = 0;
   c = 0b00000001; // Set Value
 
   if( display_config.SV[0] == '#' || !strlen(display_config.SV) )
   {
-    ESP_LOGI(MAIN_TAG,"DEBUG: Override default '%s' with '%s'", display_config.SV, NNNN_to_DDdd( node.pid.sv ) );
+    //ESP_LOGI(MAIN_TAG,"DEBUG: Override default '%s' with '%s'", display_config.SV, NNNN_to_DDdd( node.pid.sv ) );
     send_to_nextion_task(SET_CONFIG_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ) );
   }
   else
@@ -274,38 +290,33 @@ uint8_t get_current_register_values()
     // Check if SV has been changed on the panel.
     if( DDdd_to_NNNN( display_config.SV ) != node.pid.sv )
     {
-      ESP_LOGI(MAIN_TAG,"display_config.SV = '%s' != node.pid.sv = %d", display_config.SV, node.pid.sv);
       node.pid.sv = DDdd_to_NNNN( display_config.SV );
     }
   }
 
-  if( dbnode.analog.curval[REG_SV] != node.pid.sv )
+  if( runtime.reg16.curval[REG_SV] != node.pid.sv )
   {
     ESP_LOGI(MAIN_TAG,"SET_STATUS_TEXT SV=%d",node.pid.sv);
-    dbnode.analog.curval[REG_SV] = node.pid.sv;
+    runtime.reg16.curval[REG_SV] = node.pid.sv;
     result += c;
     send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ));
     //runtime.save_timeout = clock_seconds() + 10;
   }
-/*
-#endif
-#ifdef DS2482
-  c = 0b00000010; // Process Value
-  if( iobox.reg.curval[REG_PV] != curtemp )
-  {
-    iobox.reg.curval[REG_PV] = curtemp;
-    // Supress to fast update if value toggles up/down rapidly
-    result += c;
-#ifdef NEXTION
-    COMSELECT_LCD;
-    nextion_set_status_txt( "PV", NNNN_to_DDdd( curtemp ) );
-#endif
-  }
-#endif
 
-#ifdef THERMOSTAT
+  c = 0b00000010; // Process Value
+  curtemp = get_temperature();
+  if( curtemp < 9999 )
+  {
+    if( runtime.reg16.curval[REG_PV] != curtemp )
+    {
+      runtime.reg16.curval[REG_PV] = curtemp;
+      // Supress to fast update if value toggles up/down rapidly
+      result += c;
+      send_to_nextion_task(SET_STATUS_TEXT, "PV", NNNN_to_DDdd( curtemp ) );
+    }
+  }
+
   c = 0b00000100; // Mode flag
-#ifdef NEXTION
   switch( node.pid.mode )
   {
     case THERMOSTAT_MANUAL:
@@ -317,16 +328,13 @@ uint8_t get_current_register_values()
   }
   if( display_config.Mode[0] == '#' || !strlen(display_config.Mode) )
   {
-    printf("DEBUG: Override default #### with %s\n", nextion_str );
-    COMSELECT_LCD;
-    nextion_set_config_txt( "Mode", nextion_str );
+    send_to_nextion_task(SET_CONFIG_TEXT, "Mode", nextion_str );
   }
   else
   {
     // Check if Mode has been changed on the panel.
     if( strcmp( display_config.Mode, nextion_str ) )
     {
-      //printf("display_config.Mode = '%s' != node.pid.mode = '%s' \n", display_config.Mode, nextion_str );
       if( !strcmp( display_config.Mode, "Manual" ) )
       {
         node.pid.mode = THERMOSTAT_MANUAL;
@@ -339,19 +347,16 @@ uint8_t get_current_register_values()
       }
     }
   }
-#endif
 
-  if( iobox.reg.curval[REG_MODE] != node.pid.mode )
+  if( runtime.reg16.curval[REG_MODE] != node.pid.mode )
   {
-    iobox.reg.curval[REG_MODE] = node.pid.mode;
+    runtime.reg16.curval[REG_MODE] = node.pid.mode;
     result += c;
-#ifdef NEXTION
-    COMSELECT_LCD;
-    nextion_set_status_txt( "Mode", nextion_str );
-#endif
-    runtime.save_timeout = clock_seconds() + 10;
+    send_to_nextion_task(SET_STATUS_TEXT, "Mode", nextion_str );
+    //runtime.save_timeout = clock_seconds() + 10;
   }
 
+/*
 
   c = 0b00001000; // MAX ON
 #ifdef NEXTION
@@ -499,37 +504,34 @@ void scan(void)
 {
   uint8_t newflag;
   // input IO
-  dbnode.input.curflag = get_current_inputs();
-  newflag = dbnode.input.curflag ^ dbnode.input.ackflag;
+  runtime.input.curflag = get_current_inputs();
+  newflag = runtime.input.curflag ^ runtime.input.ackflag;
   if( newflag )
   {
-    dbnode.input.newflag |= newflag;
+    runtime.input.newflag |= newflag;
     return;
   }
   // output IO
-  dbnode.output.curflag = get_current_outputs();
-  newflag = dbnode.output.curflag ^ dbnode.output.ackflag;
+  runtime.output.curflag = get_current_outputs();
+  newflag = runtime.output.curflag ^ runtime.output.ackflag;
   if( newflag )
   {
-    dbnode.output.newflag |= newflag;
+    runtime.output.newflag |= newflag;
     return;
   }
   // status flags
-  newflag = dbnode.status.curflag ^ dbnode.status.ackflag;
+  newflag = runtime.status.curflag ^ runtime.status.ackflag;
   if(newflag)
   {
-    dbnode.status.newflag |= newflag;
+    runtime.status.newflag |= newflag;
     return;
   }
-  // analog registers
-  dbnode.analog.curflag = get_current_register_values();
-  newflag = dbnode.analog.curflag ^ dbnode.analog.ackflag;
+  // 16-bit registers
+  runtime.reg16.curflag = get_current_register_values();
+  newflag = runtime.reg16.curflag ^ runtime.reg16.ackflag;
   if(newflag)
   {
-    ESP_LOGI(MAIN_TAG,"dbnode.analog.newflag |= newflag %s", byte_to_binary(dbnode.analog.newflag));
-    ESP_LOGI(MAIN_TAG,"dbnode.analog.curflag            %s", byte_to_binary(dbnode.analog.curflag));
-    ESP_LOGI(MAIN_TAG,"dbnode.analog.ackflag            %s", byte_to_binary(dbnode.analog.ackflag));
-    dbnode.analog.newflag |= newflag;
+    runtime.reg16.newflag |= newflag;
     return;
   }
 }
@@ -546,75 +548,71 @@ static void scan_task(void *pvParameter)
     // Get data to send but send only one change / cycle
     scan();
 
-    if(dbnode.input.newflag)
+    if(runtime.input.newflag)
     {
-      if( dbnode.client != NULL )
+      if( runtime.client_mqtt != NULL )
       {
-        sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(dbnode.ip_addr));
-        mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.input.curflag), 8, 0, 0);
+        sprintf(topic,"/dbnode/%s/in/1",inet_ntoa(runtime.ip_addr));
+        mqtt_publish(runtime.client_mqtt, topic, byte_to_binary((uint8_t)runtime.input.curflag), 8, 0, 0);
       }
       // Clear ack- and newflag immediately, don't wait for ACK from server
       c = 0b00000001; // Mask for used bits
-      dbnode.input.ackflag &= ~c;
-      dbnode.input.ackflag |= dbnode.input.curflag & c;
-      dbnode.input.newflag &= ~c;
+      runtime.input.ackflag &= ~c;
+      runtime.input.ackflag |= runtime.input.curflag & c;
+      runtime.input.newflag &= ~c;
     }
-    else if(dbnode.output.newflag)
+    else if(runtime.output.newflag)
     {
-      if( dbnode.client != NULL )
+      if( runtime.client_mqtt != NULL )
       {
-        sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(dbnode.ip_addr));
-        mqtt_publish(dbnode.client, topic, byte_to_binary((uint8_t)dbnode.output.curflag), 8, 0, 0);
+        sprintf(topic,"/dbnode/%s/out/1",inet_ntoa(runtime.ip_addr));
+        mqtt_publish(runtime.client_mqtt, topic, byte_to_binary((uint8_t)runtime.output.curflag), 8, 0, 0);
       }
       c = 0b00000011; // Mask for used bits
-      dbnode.output.ackflag &= ~c;
-      dbnode.output.ackflag |= dbnode.output.curflag & c;
-      dbnode.output.newflag &= ~c;
+      runtime.output.ackflag &= ~c;
+      runtime.output.ackflag |= runtime.output.curflag & c;
+      runtime.output.newflag &= ~c;
     }
-    else if(dbnode.analog.newflag)
+    else if(runtime.reg16.newflag)
     {
       c = 1;
       for( i = 1; i <= 8; i++ )
       {
-        if( dbnode.analog.newflag & c )
+        if( runtime.reg16.newflag & c )
         {
-          if( dbnode.client != NULL )
+          if( runtime.client_mqtt != NULL )
           {
-            sprintf(value,"%d",dbnode.analog.curval[i-1]);
-            sprintf(topic,"/dbnode/%s/analog/%d", inet_ntoa(dbnode.ip_addr), i);
-            mqtt_publish(dbnode.client, topic, value, strlen(value), 0, 0);
+            sprintf(value,"%d",runtime.reg16.curval[i-1]);
+            sprintf(topic,"/dbnode/%s/register/%d", inet_ntoa(runtime.ip_addr), i);
+            mqtt_publish(runtime.client_mqtt, topic, value, strlen(value), 0, 0);
           }
-          //dbnode.analog.ackflag &= ~c;
-          //dbnode.analog.ackflag |= dbnode.analog.curflag & c;
-          dbnode.analog.newflag &= ~c;
+          // Clear newflag only to prevent double trig.
+          runtime.reg16.newflag &= ~c;
         }
         c = c << 1;
       }
     }
     // Update status every cycle
-    if(dbnode.status.newflag)
+    if(runtime.status.newflag)
     {
       c = 1;
       for( i = 1; i <= 8; i++ )
       {
-        if( dbnode.status.newflag & c )
+        if( runtime.status.newflag & c )
         {
           switch(c)
           {
             case NETWORK_STATUS:
-              send_to_nextion_task(SET_STATUS_TEXT, "Network", (dbnode.status.curflag & c) ? "Ok" : "Error" );
+              send_to_nextion_task(SET_STATUS_TEXT, "Network", (runtime.status.curflag & c) ? "Ok" : "Error" );
             break;
           }
-          dbnode.status.ackflag &= ~c;
-          dbnode.status.ackflag |= dbnode.status.curflag & c;
-          dbnode.status.newflag &= ~c;
+          runtime.status.ackflag &= ~c;
+          runtime.status.ackflag |= runtime.status.curflag & c;
+          runtime.status.newflag &= ~c;
         }
         c = c << 1;
       }
-
     }
-
-
     vTaskDelay( 50 / portTICK_PERIOD_MS);
   }
 }
@@ -626,19 +624,19 @@ static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
             esp_wifi_connect();
             break;
         case SYSTEM_EVENT_STA_GOT_IP:
-            dbnode.blink_intervall = 500;
+            runtime.blink_intervall = 500;
             xEventGroupSetBits(wifi_event_group, CONNECTED_BIT);
-            dbnode.ip_addr = event->event_info.got_ip.ip_info.ip;
-            sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(dbnode.ip_addr), (uint16_t)esp_random());
-            dbnode.client = mqtt_start(&settings);
-            dbnode.status.curflag |= NETWORK_STATUS;
+            runtime.ip_addr = event->event_info.got_ip.ip_info.ip;
+            sprintf( settings.client_id,"dbnode-%s-%d", inet_ntoa(runtime.ip_addr), (uint16_t)esp_random());
+            runtime.client_mqtt = mqtt_start(&settings);
+            runtime.status.curflag |= NETWORK_STATUS;
             //init app here
             break;
         case SYSTEM_EVENT_STA_DISCONNECTED:
             /* This is a workaround as ESP32 WiFi libs don't currently
                auto-reassociate. */
-            dbnode.blink_intervall = 200; // no wifi!
-            dbnode.status.curflag &= ~NETWORK_STATUS;
+            runtime.blink_intervall = 200; // no wifi!
+            runtime.status.curflag &= ~NETWORK_STATUS;
             mqtt_stop();
             esp_wifi_connect();
             xEventGroupClearBits(wifi_event_group, CONNECTED_BIT);
@@ -682,9 +680,24 @@ void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const
 
 }
 
+uint16_t get_temperature(void)
+{
+  uint16_t td;
+  float tf;
+  char ts[8];
+
+  tf = DS_get_temp();
+  sprintf( ts,"%3.1f",tf);
+  td = tf * 10;
+  td *= 10;
+  //ESP_LOGI(MAIN_TAG,"get_temperature(): tf = %3.2f ts = '%s' td = %d", tf, ts, td);
+
+  return td;
+
+}
+
 void app_main()
 {
-  char temperature[5];
 
   ESP_LOGI(MAIN_TAG, "[APP] Startup..");
 
@@ -697,14 +710,11 @@ void app_main()
   xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
   //xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
 
-  inet_aton("127.0.0.1", &dbnode.ip_addr);
+  inet_aton("127.0.0.1", &runtime.ip_addr);
   wifi_conn_init();
 
   while(1)
   {
-    sprintf(temperature,"%3.1f", DS_get_temp());
-    send_to_nextion_task(SET_STATUS_TEXT, "PV", temperature);
-    //ESP_LOGI(MAIN_TAG,"PV = %s", temperature);
     send_to_nextion_task(GET_CONFIG_TEXT, "", "");
     vTaskDelay(1000/portTICK_PERIOD_MS);
   }
