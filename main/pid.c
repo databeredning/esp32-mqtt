@@ -6,8 +6,10 @@
 //#define DEBUG
 
 #include <stdio.h>
+#include <time.h>
 #include "pid.h"
 
+const char *PID_TAG = "PID";
 
 void pid_compute( pidreg_t * tc, int16_t sv, int16_t pv )
 {

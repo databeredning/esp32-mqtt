@@ -5,7 +5,9 @@
 #include "mqtt.h"
 #include "pid.h"
 
-
+#define COLD  0            // Level 0. Load default config
+#define START 1            // Level 1. Load running config and do one loop
+#define RUN   2            // Level 2. Serving IO
 // Status bits in node_runtime.status.curflag
 #define NETWORK_STATUS 0b00000001
 

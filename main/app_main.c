@@ -5,6 +5,7 @@
 #include "esp_wifi.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_event_loop.h"
 
 #include "freertos/FreeRTOS.h"
@@ -38,17 +39,11 @@ const static int CONNECTED_BIT = BIT0;
 
 static config_node node;
 
-runtime_node runtime =
-{
-  .client_mqtt = NULL,
-  .blink_intervall = 200,
-  .status.newflag = 0b00000001,
-  .input.newflag  = 0b00000001,
-  .output.newflag = 0b00000011
-};
+static runtime_node runtime;
 
 // == Private function prototypes ==============================
 
+esp_err_t save_config(void);
 uint16_t get_temperature(void);
 const char * NNNN_to_DDdd( uint16_t val );
 void send_to_nextion_task( nextion_queue_message_id_t id, const char *var, const char* value );
@@ -300,6 +295,7 @@ uint8_t get_current_register_values()
     runtime.reg16.curval[REG_SV] = node.pid.sv;
     result += c;
     send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ));
+    save_config();
     //runtime.save_timeout = clock_seconds() + 10;
   }
 
@@ -691,9 +687,102 @@ uint16_t get_temperature(void)
   td = tf * 10;
   td *= 10;
   //ESP_LOGI(MAIN_TAG,"get_temperature(): tf = %3.2f ts = '%s' td = %d", tf, ts, td);
-
   return td;
+}
 
+void clear_runtime(void)
+{
+  inet_aton("127.0.0.1", &runtime.ip_addr);
+  runtime.client_mqtt = NULL;
+  runtime.client_mqtt = NULL;
+  runtime.blink_intervall = 200;
+  runtime.status.newflag = 0b00000001;
+  runtime.input.newflag  = 0b00000001;
+  runtime.output.newflag = 0b00000011;
+}
+
+esp_err_t read_config(void)
+{
+  nvs_handle nvh;
+  esp_err_t err;
+
+
+  // Default values
+  node.mode = COLD;
+  node.max_on = 120;
+  node.min_on = 1;
+  node.max_off = 300;
+  node.min_off = 1;
+  node.hysteresis = 10;
+
+  node.pid.mode = THERMOSTAT_AUTO;
+  node.pid.sv = 1800;
+  node.pid.kp = -1;
+  node.pid.ki = 0;
+  node.pid.kd = 0;
+  node.pid.sample_time = 2;
+  node.pid.out_max = 200;
+  node.pid.out_min = -200;
+
+
+  err = nvs_open("dbnode", NVS_READWRITE, &nvh);
+  if(err != ESP_OK)
+    return err;
+
+  nvs_get_u16(nvh, "mode", &node.mode);
+  nvs_get_u16(nvh, "max_on", &node.max_on);
+  nvs_get_u16(nvh, "max_off", &node.max_off);
+  nvs_get_u16(nvh, "min_on", &node.min_on);
+  nvs_get_u16(nvh, "min_off", &node.min_off);
+  nvs_get_u16(nvh, "hysteresis", &node.hysteresis);
+
+  nvs_get_u8(nvh, "pid.mode", &node.pid.mode);
+  nvs_get_u8(nvh, "pid.direction", &node.pid.direction);
+  nvs_get_i16(nvh, "pid.sv", &node.pid.sv);
+  nvs_get_i16(nvh, "pid.kp", &node.pid.kp);
+  nvs_get_i16(nvh, "pid.ki", &node.pid.ki);
+  nvs_get_i16(nvh, "pid.kd", &node.pid.kd);
+  nvs_get_i16(nvh, "pid.out_max", &node.pid.out_max);
+  nvs_get_i16(nvh, "pid.out_min", &node.pid.out_min);
+  nvs_get_i16(nvh, "pid.sample_time", &node.pid.sample_time);
+
+  return ESP_OK;
+}
+
+esp_err_t save_config(void)
+{
+  nvs_handle nvh;
+  esp_err_t err;
+
+  ESP_LOGI(MAIN_TAG,"save_config()");
+
+  err = nvs_open("dbnode", NVS_READWRITE, &nvh);
+  if(err != ESP_OK)
+    return err;
+
+  nvs_set_u16(nvh, "mode", node.mode);
+  nvs_set_u16(nvh, "max_on", node.max_on);
+  nvs_set_u16(nvh, "max_off", node.max_off);
+  nvs_set_u16(nvh, "min_on", node.min_on);
+  nvs_set_u16(nvh, "min_off", node.min_off);
+  nvs_set_u16(nvh, "hysteresis", node.hysteresis);
+
+  nvs_set_u8(nvh, "pid.mode", node.pid.mode);
+  nvs_set_u8(nvh, "pid.direction", node.pid.direction);
+  nvs_set_i16(nvh, "pid.sv", node.pid.sv);
+  nvs_set_i16(nvh, "pid.kp", node.pid.kp);
+  nvs_set_i16(nvh, "pid.ki", node.pid.ki);
+  nvs_set_i16(nvh, "pid.kd", node.pid.kd);
+  nvs_set_i16(nvh, "pid.out_max", node.pid.out_max);
+  nvs_set_i16(nvh, "pid.out_min", node.pid.out_min);
+  nvs_set_i16(nvh, "pid.sample_time", node.pid.sample_time);
+
+  err = nvs_commit(nvh);
+  if(err != ESP_OK)
+    return err;
+
+  nvs_close(nvh);
+  return ESP_OK;
 }
 
 void app_main()
@@ -705,12 +794,24 @@ void app_main()
   peripherial_init();
   DS_init(17);
 
+  clear_runtime();
+  read_config();
+
+  ESP_LOGI(MAIN_TAG,"node.pid.sv = %d", node.pid.sv);
+
+
+  if(node.mode == COLD)
+  {
+    node.mode = RUN;
+    save_config();
+  }
+
   xTaskCreate( &blink_task, "Blink", 2048, NULL, 5, NULL );
   xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
+
   xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
   //xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
 
-  inet_aton("127.0.0.1", &runtime.ip_addr);
   wifi_conn_init();
 
   while(1)
