@@ -166,13 +166,24 @@ static void parse_mqtt_message( char *topic, char *payload)
             break;
           }
         break;
-        case 4: // MaxOnTime -> Cycle time PWM output
-          node.max_on = value;
-          send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", itoa(value, valstr, 10));
+        case 4: // MaxOnTime -> Pulse width PWM output
+          if(value > 0 && value < node.max_off)
+          {
+            node.max_on = value;
+            send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", itoa(value, valstr, 10));
+          }
         break;
-        case 5: // MaxOffTime -> Pulse width PWM output
-          node.max_off = value;
-          send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", itoa(value, valstr, 10));
+        case 5: // MaxOffTime -> Cycle time PWM output
+          if(value > 0)
+          {
+            node.max_off = value;
+            send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", itoa(value, valstr, 10));
+          }
+        break;
+        case 6: // Hysteresis
+          if(value >= 0 && value <= (node.pid.out_max / 2))
+            node.hysteresis = value;
+          //send_to_nextion_task(SET_CONFIG_TEXT, "Hysteresis", itoa(value, valstr, 10));
         break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
@@ -485,7 +496,6 @@ uint8_t get_current_outputs(void)
 
 void set_output( uint8_t iopin, uint8_t value )
 {
-  uint8_t bit;
 
   switch(iopin)
   {
