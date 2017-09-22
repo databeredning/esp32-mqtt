@@ -56,6 +56,8 @@ typedef struct
   dio8_t input;
   dio8_t output;
   aio8_16bit_t reg16;
+  unsigned long on_timeout;
+  unsigned long off_timeout;
 } runtime_node;
 
 

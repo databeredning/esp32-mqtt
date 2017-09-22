@@ -47,6 +47,7 @@ static runtime_node runtime;
 
 // == Private function prototypes ==============================
 
+void set_output( uint8_t iopin, uint8_t value );
 esp_err_t save_config(void);
 uint16_t get_temperature(void);
 const char * NNNN_to_DDdd( uint16_t val );
@@ -125,10 +126,12 @@ static void parse_mqtt_message( char *topic, char *payload)
       switch (atoi(token))
       {
         case 32:
-          gpio_set_level(GPIO_NUM_32, payload[0] == '1' ? 1 : 0);
+          set_output(GPIO_NUM_32, payload[0] == '1' ? 1 : 0);
+          //gpio_set_level(GPIO_NUM_32, payload[0] == '1' ? 1 : 0);
         break;
         case 33:
-          gpio_set_level(GPIO_NUM_33, payload[0] == '1' ? 1 : 0);
+          set_output(GPIO_NUM_33, payload[0] == '1' ? 1 : 0);
+          //gpio_set_level(GPIO_NUM_33, payload[0] == '1' ? 1 : 0);
         break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
@@ -167,7 +170,7 @@ static void parse_mqtt_message( char *topic, char *payload)
           node.max_on = value;
           send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", itoa(value, valstr, 10));
         break;
-        case 5: // MaxOnTime -> Cycle time PWM output
+        case 5: // MaxOffTime -> Pulse width PWM output
           node.max_off = value;
           send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", itoa(value, valstr, 10));
         break;
@@ -480,6 +483,32 @@ uint8_t get_current_outputs(void)
   return result;
 }
 
+void set_output( uint8_t iopin, uint8_t value )
+{
+  uint8_t bit;
+
+  switch(iopin)
+  {
+    case GPIO_NUM_32:
+      send_to_nextion_task(SET_STATUS_TEXT, "Output1", value == 1 ? "On" : "Off" );
+    break;
+    case GPIO_NUM_33:
+      send_to_nextion_task(SET_STATUS_TEXT, "Output2", value == 1 ? "On" : "Off" );
+    break;
+    default:
+      return;
+  }
+
+  if(value == 1)
+  {
+    gpio_set_level(iopin, 1);
+  }
+  else if(value == 0)
+  {
+    gpio_set_level(iopin, 0);
+  }
+}
+
 static const char *byte_to_binary(uint8_t x)
 {
   static char b[9];
@@ -689,9 +718,9 @@ uint16_t get_temperature(void)
 
   float factor = (42870 - 31140)/100;  // units per C
   tf = (float)(mcp3551_value - 31140) / factor;
-  td = (uint16_t)(tf*100);
-
-  ESP_LOGI(MAIN_TAG,"mcp3551_value = %d tf = %f td = %d", mcp3551_value, tf, td);
+  td = (uint16_t)(tf*10);
+  td *= 10;
+  //ESP_LOGI(MAIN_TAG,"mcp3551_value = %d tf = %f td = %d", mcp3551_value, tf, td);
 
   return td;
 }
@@ -793,8 +822,47 @@ esp_err_t save_config(void)
 
 void pid_timer_cb( TimerHandle_t xTimer )
 {
+  static uint8_t outflag = 0;
+  unsigned long now = xTaskGetTickCount() / 1000;
+
+  //ESP_LOGI( MAIN_TAG,"xTaskGetTickCount() / 1000 = %ld", now);
   pid_compute( &node.pid, get_temperature() );
 
+  if( ( node.pid.output > node.hysteresis ) && ( node.pid.mode == THERMOSTAT_AUTO ) )
+  {
+    if( outflag == 0 ) // if outflag == 0 then we're going off->on
+    {
+      outflag = 1;
+      send_to_nextion_task(SET_STATUS_TEXT, "PIDout", "1" );
+    }
+    if( runtime.off_timeout <= now )
+    {
+      runtime.on_timeout = now + node.max_on;
+      runtime.off_timeout = now + node.max_on + node.max_off;
+      set_output(GPIO_NUM_32, 1 );
+      set_output(GPIO_NUM_33, 1 );
+    }
+
+    if( runtime.on_timeout <= now )
+    {
+      runtime.off_timeout = now + node.max_off;
+      runtime.on_timeout = now + node.max_off + node.max_on;
+      set_output(GPIO_NUM_32, 0 );
+      set_output(GPIO_NUM_33, 0 );
+    }
+  }
+  else if( ( node.pid.output < -node.hysteresis ) || ( node.pid.mode != THERMOSTAT_AUTO ) )
+  {
+    if( outflag ) // if outflag != 0 then we're going on->off
+    {
+      outflag = 0;
+      send_to_nextion_task(SET_STATUS_TEXT, "PIDout", "0" );
+      set_output(GPIO_NUM_32, 0 );
+      set_output(GPIO_NUM_33, 0 );
+      runtime.on_timeout = 0;
+      runtime.off_timeout = 0;
+    }
+  }
 }
 
 void app_main()
