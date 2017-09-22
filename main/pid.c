@@ -48,7 +48,7 @@ void pid_compute( pidreg_t * tc, int16_t pv )
   //tc->last_time = now;
   tc->output = output;
 
-  ESP_LOGI(PID_TAG,"pid_compute() output = %d", output);
+  //ESP_LOGI(PID_TAG,"pid_compute() output = %d", output);
 
 }
 

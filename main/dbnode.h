@@ -11,12 +11,24 @@
 // Status bits in node_runtime.status.curflag
 #define NETWORK_STATUS 0b00000001
 
+/*
 #define REG_SV 0           // Set value
 #define REG_PV 1           // Process value
 #define REG_MODE 2         // MANUAL / AUTO
 #define REG_MAX_ON 3       // Max on timer
 #define REG_MAX_OFF 4      // Max off timer
 #define REG_HYST 5         // Hysteresis, 10 = 1/10 of degree
+*/
+
+typedef enum
+{
+  REG_SV         = 0,
+  REG_PV         = 1,
+  REG_MODE       = 2,
+  REG_MAX_ON     = 3,
+  REG_MAX_OFF    = 4,
+  REG_HYST       = 5,
+} reg16_t;
 
 extern int32_t mcp3551_value;
 

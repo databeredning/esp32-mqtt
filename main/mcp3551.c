@@ -93,7 +93,7 @@ void mcp3551_task(void *pvParameter)
       ad.value=0x400000-ad.value;
     }
 */
-    ESP_LOGI(tag, "%02X %02X %02X = %d", rx_data[0], rx_data[1], rx_data[2], ad.value);
+    //ESP_LOGI(tag, "%02X %02X %02X = %d", rx_data[0], rx_data[1], rx_data[2], ad.value);
 
     mcp3551_value = ad.value;
 

@@ -137,12 +137,14 @@ static void parse_mqtt_message( char *topic, char *payload)
   }
   else if(!strcmp(token, "setreg"))
   {
+    char valstr[16];
+
     value = atoi(payload);
     if( value <= 9999 )
     {
       token = strtok( NULL, "/" );
       ESP_LOGI(MAIN_TAG,"/dbnode/%s/setreg/%s '%s'", inet_ntoa(runtime.ip_addr), token, payload);
-      switch (atoi(token))
+      switch(atoi(token))
       {
         case 1: // Set value
           node.pid.sv = value; // Is this necessary to set here?
@@ -161,6 +163,14 @@ static void parse_mqtt_message( char *topic, char *payload)
             break;
           }
         break;
+        case 4: // MaxOnTime -> Cycle time PWM output
+          node.max_on = value;
+          send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", itoa(value, valstr, 10));
+        break;
+        case 5: // MaxOnTime -> Cycle time PWM output
+          node.max_off = value;
+          send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", itoa(value, valstr, 10));
+        break;
         default:
           ESP_LOGE("DBNODE","Undefined output request!");
       }
@@ -169,7 +179,8 @@ static void parse_mqtt_message( char *topic, char *payload)
 }
 
 mqtt_settings settings = {
-    .host = "172.19.2.39",
+//  .host = "172.19.2.39",
+    .host = "10.10.1.195",
 #if defined(CONFIG_MQTT_SECURITY_ON)
     .port = 8883, // encrypted
 #else
@@ -295,7 +306,6 @@ uint8_t get_current_register_values()
 
   if( runtime.reg16.curval[REG_SV] != node.pid.sv )
   {
-    ESP_LOGI(MAIN_TAG,"SET_STATUS_TEXT SV=%d",node.pid.sv);
     runtime.reg16.curval[REG_SV] = node.pid.sv;
     result += c;
     send_to_nextion_task(SET_STATUS_TEXT, "SV", NNNN_to_DDdd( node.pid.sv ));
@@ -353,86 +363,71 @@ uint8_t get_current_register_values()
     runtime.reg16.curval[REG_MODE] = node.pid.mode;
     result += c;
     send_to_nextion_task(SET_STATUS_TEXT, "Mode", nextion_str );
+    save_config();
+    //runtime.save_timeout = clock_seconds() + 10;
+  }
+//=============================================================================
+
+  c = 0b00001000; // MAX ON
+  sprintf( nextion_str,"%d", node.max_on );
+  if( display_config.MaxOnTime[0] == '#' || !strlen(display_config.MaxOnTime) )
+  { // Nextion coldstart values
+    send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", nextion_str );
+  }
+  else
+  {
+    // Update node.max_on if MaxOnTime has been changed on the panel.
+    if( strcmp( display_config.MaxOnTime, nextion_str ) )
+    {
+      node.max_on = atoi( display_config.MaxOnTime );
+    }
+  }
+
+  if( runtime.reg16.curval[REG_MAX_ON] != node.max_on )
+  {
+    runtime.reg16.curval[REG_MAX_ON] = node.max_on;
+    result += c;
+    sprintf( nextion_str,"%d", node.max_on );
+    send_to_nextion_task(SET_STATUS_TEXT, "MaxOnTime", nextion_str );
+    save_config();
     //runtime.save_timeout = clock_seconds() + 10;
   }
 
-/*
-
-  c = 0b00001000; // MAX ON
-#ifdef NEXTION
-  sprintf( nextion_str,"%d", node.max_on );
-  if( display_config.MaxOnTime[0] == '#' || !strlen(display_config.MaxOnTime) )
-  {
-    printf("DEBUG: Override default #### with %s\n", nextion_str );
-    COMSELECT_LCD;
-    nextion_set_config_txt( "MaxOnTime", nextion_str );
-  }
-  else
-  {
-    // Check if MaxOnTime has been changed on the panel.
-    if( strcmp( display_config.MaxOnTime, nextion_str ) )
-    {
-      //printf("display_config.MaxOnTime = '%s' != node.max_on = '%s' \n", display_config.MaxOnTime, nextion_str );
-      node.max_on = atoi( display_config.MaxOnTime );
-      printf("atoi( display_config.MaxOnTime ) = %d\n", node.max_on);
-    }
-  }
-#endif
-
-  if( iobox.reg.curval[REG_MAX_ON] != node.max_on )
-  {
-    iobox.reg.curval[REG_MAX_ON] = node.max_on;
-    result += c;
-#ifdef NEXTION
-    sprintf( nextion_str,"%d", node.max_on );
-    COMSELECT_LCD;
-    nextion_set_status_txt( "MaxOnTime", nextion_str );
-#endif
-    runtime.save_timeout = clock_seconds() + 10;
-  }
+  //=============================================================================
 
   c = 0b00010000; // MAX OFF
-#ifdef NEXTION
   sprintf( nextion_str,"%d", node.max_off );
   if( display_config.MaxOffTime[0] == '#' || !strlen(display_config.MaxOffTime) )
-  {
-    printf("DEBUG: Override default #### with %s\n", nextion_str );
-    COMSELECT_LCD;
-    nextion_set_config_txt( "MaxOffTime", nextion_str );
+  { // Nextion coldstart values
+    send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", nextion_str );
   }
   else
   {
-    // Check if MaxOffTime has been changed on the panel.
     if( strcmp( display_config.MaxOffTime, nextion_str ) )
     {
-      //printf("display_config.MaxOffTime = '%s' != node.max_off = '%s' \n", display_config.MaxOffTime, nextion_str );
       node.max_off = atoi( display_config.MaxOffTime );
-      printf("atoi( display_config.MaxOffTime ) = %d\n", node.max_off);
     }
   }
-#endif
-  if( iobox.reg.curval[REG_MAX_OFF] != node.max_off )
+
+  if( runtime.reg16.curval[REG_MAX_OFF] != node.max_off )
   {
-    iobox.reg.curval[REG_MAX_OFF] = node.max_off;
+    runtime.reg16.curval[REG_MAX_OFF] = node.max_off;
     result += c;
-#ifdef NEXTION
     sprintf( nextion_str,"%d", node.max_off );
-    COMSELECT_LCD;
-    nextion_set_status_txt( "MaxOffTime", nextion_str );
-#endif
+    send_to_nextion_task(SET_STATUS_TEXT, "MaxOffTime", nextion_str );
+    save_config();
+    //runtime.save_timeout = clock_seconds() + 10;
   }
 
   c = 0b00100000; // Hysteresis PID output
-  if( iobox.reg.curval[REG_HYST] != node.hysteresis )
+  if( runtime.reg16.curval[REG_HYST] != node.hysteresis )
   {
-    iobox.reg.curval[REG_HYST] = node.hysteresis;
+    runtime.reg16.curval[REG_HYST] = node.hysteresis;
     result += c;
-    runtime.save_timeout = clock_seconds() + 10;
+    save_config();
+    //runtime.save_timeout = clock_seconds() + 10;
   }
-#endif
-*/
 /*
-#ifdef MODBUS
   c = 0b00100000;
   if( iobox.reg.curval[REG_MODB_1] != modbus_register[0] )
   {
@@ -451,7 +446,6 @@ uint8_t get_current_register_values()
     iobox.reg.curval[REG_MODB_3] = modbus_register[2];
     result += c;
   }
-#endif
 */
   return result;
 }
@@ -691,9 +685,13 @@ uint16_t get_temperature(void)
   td = tf * 10;
   td *= 10;
 
-//  ESP_LOGI(MAIN_TAG,"mcp3551_value = %d", mcp3551_value);
+  //======= PT100
 
-  td = (uint16_t)(mcp3551_value/10); // Just for check
+  float factor = (42870 - 31140)/100;  // units per C
+  tf = (float)(mcp3551_value - 31140) / factor;
+  td = (uint16_t)(tf*100);
+
+  ESP_LOGI(MAIN_TAG,"mcp3551_value = %d tf = %f td = %d", mcp3551_value, tf, td);
 
   return td;
 }
@@ -793,9 +791,10 @@ esp_err_t save_config(void)
   return ESP_OK;
 }
 
-void pid_timer_cb(void)
+void pid_timer_cb( TimerHandle_t xTimer )
 {
   pid_compute( &node.pid, get_temperature() );
+
 }
 
 void app_main()
