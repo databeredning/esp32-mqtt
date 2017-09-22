@@ -18,6 +18,8 @@
 #define REG_MAX_OFF 4      // Max off timer
 #define REG_HYST 5         // Hysteresis, 10 = 1/10 of degree
 
+extern int32_t mcp3551_value;
+
 typedef struct
 {
   uint8_t curflag;

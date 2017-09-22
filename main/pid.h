@@ -20,15 +20,14 @@ typedef struct
   int16_t out_min;         // Min output
   int16_t sample_time;     // Loop time in seconds
   // runtime vars
-  unsigned long last_time; // 
+  unsigned long last_time; //
   int16_t last_input;
   int16_t iterm;           // Derivative on Measurement
   int16_t output;          // output value
 } pidreg_t;
 
-void pid_compute( pidreg_t * tc, int16_t sv, int16_t pv ); 
+void pid_compute( pidreg_t * tc, int16_t pv );
 
 void pid_init( pidreg_t * tc, int16_t pv );
 
 #endif
-

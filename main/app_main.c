@@ -29,6 +29,7 @@
 #include "nextion.h"
 #include "dbnode.h"
 #include "modbus.h"
+#include "mcp3551.h"
 
 const char *MAIN_TAG = "DBNODE";
 
@@ -689,7 +690,11 @@ uint16_t get_temperature(void)
   sprintf( ts,"%3.1f",tf);
   td = tf * 10;
   td *= 10;
-  //ESP_LOGI(MAIN_TAG,"get_temperature(): tf = %3.2f ts = '%s' td = %d", tf, ts, td);
+
+//  ESP_LOGI(MAIN_TAG,"mcp3551_value = %d", mcp3551_value);
+
+  td = (uint16_t)(mcp3551_value/10); // Just for check
+
   return td;
 }
 
@@ -790,7 +795,7 @@ esp_err_t save_config(void)
 
 void pid_timer_cb(void)
 {
-  pid_compute( &node.pid, node.pid.sv, get_temperature() );
+  pid_compute( &node.pid, get_temperature() );
 }
 
 void app_main()
@@ -817,10 +822,13 @@ void app_main()
   xTaskCreate( &nextion_task, "Nextion", 2048, NULL, 5, &xNextionTask );
   xTaskCreate( &scan_task, "Scan", 2048, NULL, 5, &xScanTask );
   //xTaskCreate( &modbus_task, "Modbus", 2048, NULL, 5, NULL );
+  xTaskCreate( &mcp3551_task, "MCP3551", 2048, NULL, 5, NULL );
 
   wifi_conn_init();
 
-  xTimerPID = xTimerCreate("PID", 1000/portTICK_PERIOD_MS, pdTRUE, ( void * ) 0, pid_timer_cb );
+  // Timer for PID regulator.
+  xTimerPID = xTimerCreate("PID", (1000*node.pid.sample_time)/portTICK_PERIOD_MS, pdTRUE, ( void * ) 0, pid_timer_cb );
+  pid_init(&node.pid, get_temperature());
   xTimerStart(xTimerPID, 0);
 
   while(1)
