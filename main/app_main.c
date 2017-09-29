@@ -167,16 +167,16 @@ static void parse_mqtt_message( char *topic, char *payload)
           }
         break;
         case 4: // MaxOnTime -> Pulse width PWM output
-          if(value > 0 && value < node.max_off)
+          if(value > 0 && value < node.output_cycle_time)
           {
-            node.max_on = value;
+            node.output_pulse_width = value;
             send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", itoa(value, valstr, 10));
           }
         break;
         case 5: // MaxOffTime -> Cycle time PWM output
           if(value > 0)
           {
-            node.max_off = value;
+            node.output_cycle_time = value;
             send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", itoa(value, valstr, 10));
           }
         break;
@@ -383,25 +383,25 @@ uint8_t get_current_register_values()
 //=============================================================================
 
   c = 0b00001000; // MAX ON
-  sprintf( nextion_str,"%d", node.max_on );
+  sprintf( nextion_str,"%d", node.output_pulse_width );
   if( display_config.MaxOnTime[0] == '#' || !strlen(display_config.MaxOnTime) )
   { // Nextion coldstart values
     send_to_nextion_task(SET_CONFIG_TEXT, "MaxOnTime", nextion_str );
   }
   else
   {
-    // Update node.max_on if MaxOnTime has been changed on the panel.
+    // Update node.output_pulse_width if MaxOnTime has been changed on the panel.
     if( strcmp( display_config.MaxOnTime, nextion_str ) )
     {
-      node.max_on = atoi( display_config.MaxOnTime );
+      node.output_pulse_width = atoi( display_config.MaxOnTime );
     }
   }
 
-  if( runtime.reg16.curval[REG_MAX_ON] != node.max_on )
+  if( runtime.reg16.curval[REG_MAX_ON] != node.output_pulse_width )
   {
-    runtime.reg16.curval[REG_MAX_ON] = node.max_on;
+    runtime.reg16.curval[REG_MAX_ON] = node.output_pulse_width;
     result += c;
-    sprintf( nextion_str,"%d", node.max_on );
+    sprintf( nextion_str,"%d", node.output_pulse_width );
     send_to_nextion_task(SET_STATUS_TEXT, "MaxOnTime", nextion_str );
     save_config();
     //runtime.save_timeout = clock_seconds() + 10;
@@ -410,7 +410,7 @@ uint8_t get_current_register_values()
   //=============================================================================
 
   c = 0b00010000; // MAX OFF
-  sprintf( nextion_str,"%d", node.max_off );
+  sprintf( nextion_str,"%d", node.output_cycle_time );
   if( display_config.MaxOffTime[0] == '#' || !strlen(display_config.MaxOffTime) )
   { // Nextion coldstart values
     send_to_nextion_task(SET_CONFIG_TEXT, "MaxOffTime", nextion_str );
@@ -419,15 +419,15 @@ uint8_t get_current_register_values()
   {
     if( strcmp( display_config.MaxOffTime, nextion_str ) )
     {
-      node.max_off = atoi( display_config.MaxOffTime );
+      node.output_cycle_time = atoi( display_config.MaxOffTime );
     }
   }
 
-  if( runtime.reg16.curval[REG_MAX_OFF] != node.max_off )
+  if( runtime.reg16.curval[REG_MAX_OFF] != node.output_cycle_time )
   {
-    runtime.reg16.curval[REG_MAX_OFF] = node.max_off;
+    runtime.reg16.curval[REG_MAX_OFF] = node.output_cycle_time;
     result += c;
-    sprintf( nextion_str,"%d", node.max_off );
+    sprintf( nextion_str,"%d", node.output_cycle_time );
     send_to_nextion_task(SET_STATUS_TEXT, "MaxOffTime", nextion_str );
     save_config();
     //runtime.save_timeout = clock_seconds() + 10;
@@ -726,8 +726,10 @@ uint16_t get_temperature(void)
 
   //======= PT100
 
-  float factor = (42870 - 31140)/100;  // units per C
-  tf = (float)(mcp3551_value - 31140) / factor;
+//  float factor = (42870 - 31140)/100;  // units per C
+//  tf = (float)(mcp3551_value - 31140) / factor;
+  float factor = 6409;  // units per C
+  tf = (float)((mcp3551_value / factor) - 60.0);
   td = (uint16_t)(tf*10);
   td *= 10;
   //ESP_LOGI(MAIN_TAG,"mcp3551_value = %d tf = %f td = %d", mcp3551_value, tf, td);
@@ -754,10 +756,8 @@ esp_err_t read_config(void)
 
   // Default values
   node.mode = COLD;
-  node.max_on = 120;
-  node.min_on = 1;
-  node.max_off = 300;
-  node.min_off = 1;
+  node.output_pulse_width = 120;
+  node.output_cycle_time = 300;
   node.hysteresis = 10;
 
   node.pid.mode = THERMOSTAT_AUTO;
@@ -775,10 +775,8 @@ esp_err_t read_config(void)
     return err;
 
   nvs_get_u16(nvh, "mode", &node.mode);
-  nvs_get_u16(nvh, "max_on", &node.max_on);
-  nvs_get_u16(nvh, "max_off", &node.max_off);
-  nvs_get_u16(nvh, "min_on", &node.min_on);
-  nvs_get_u16(nvh, "min_off", &node.min_off);
+  nvs_get_u16(nvh, "max_on", &node.output_pulse_width);
+  nvs_get_u16(nvh, "max_off", &node.output_cycle_time);
   nvs_get_u16(nvh, "hysteresis", &node.hysteresis);
 
   nvs_get_u8(nvh, "pid.mode", &node.pid.mode);
@@ -806,10 +804,8 @@ esp_err_t save_config(void)
     return err;
 
   nvs_set_u16(nvh, "mode", node.mode);
-  nvs_set_u16(nvh, "max_on", node.max_on);
-  nvs_set_u16(nvh, "max_off", node.max_off);
-  nvs_set_u16(nvh, "min_on", node.min_on);
-  nvs_set_u16(nvh, "min_off", node.min_off);
+  nvs_set_u16(nvh, "max_on", node.output_pulse_width);
+  nvs_set_u16(nvh, "max_off", node.output_cycle_time);
   nvs_set_u16(nvh, "hysteresis", node.hysteresis);
 
   nvs_set_u8(nvh, "pid.mode", node.pid.mode);
@@ -838,6 +834,16 @@ void pid_timer_cb( TimerHandle_t xTimer )
   //ESP_LOGI( MAIN_TAG,"xTaskGetTickCount() / 1000 = %ld", now);
   pid_compute( &node.pid, get_temperature() );
 
+/*
+    ____________________                                  __________
+___|                    |________________________________|
+
+    |--------------------  Cycle time --------------------| Former MaxOffTime
+
+    |---- Pulse width ---|  Former MaxOnTime
+
+*/
+
   if( ( node.pid.output > node.hysteresis ) && ( node.pid.mode == THERMOSTAT_AUTO ) )
   {
     if( outflag == 0 ) // if outflag == 0 then we're going off->on
@@ -845,20 +851,25 @@ void pid_timer_cb( TimerHandle_t xTimer )
       outflag = 1;
       send_to_nextion_task(SET_STATUS_TEXT, "PIDout", "1" );
     }
+
     if( runtime.off_timeout <= now )
     {
-      runtime.on_timeout = now + node.max_on;
-      runtime.off_timeout = now + node.max_on + node.max_off;
+//      runtime.off_timeout = now + node.output_pulse_width + node.output_cycle_time;
+      runtime.on_timeout = now + node.output_pulse_width;
+      runtime.off_timeout = now + node.output_cycle_time;
       set_output(GPIO_NUM_32, 1 );
       set_output(GPIO_NUM_33, 1 );
+      ESP_LOGI( MAIN_TAG, "%ld : On -> On tmo %d (Off tmo %d)", now, runtime.on_timeout, runtime.off_timeout );
     }
 
     if( runtime.on_timeout <= now )
     {
-      runtime.off_timeout = now + node.max_off;
-      runtime.on_timeout = now + node.max_off + node.max_on;
+//      runtime.off_timeout = now + node.output_cycle_time;
+//      runtime.on_timeout = now + node.output_cycle_time + node.output_pulse_width;
+      runtime.on_timeout = now + node.output_pulse_width;
       set_output(GPIO_NUM_32, 0 );
       set_output(GPIO_NUM_33, 0 );
+      ESP_LOGI( MAIN_TAG, "%ld : Off -> Off tmo %d (On tmo %d)", now, runtime.off_timeout, runtime.on_timeout );
     }
   }
   else if( ( node.pid.output < -node.hysteresis ) || ( node.pid.mode != THERMOSTAT_AUTO ) )

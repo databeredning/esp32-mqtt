@@ -63,13 +63,11 @@ typedef struct
 
 typedef struct
 {
-  uint16_t   mode;            // Mode node COLD / RUN
-  uint16_t   max_on;
-  uint16_t   max_off;
-  uint16_t   min_on;
-  uint16_t   min_off;
+  uint16_t   mode;                // Mode node COLD / RUN
+  uint16_t   output_cycle_time;
+  uint16_t   output_pulse_width;
   uint16_t   hysteresis;
-  pidreg_t   pid;             // PID config
+  pidreg_t   pid;                 // PID config
 } config_node;
 
 
